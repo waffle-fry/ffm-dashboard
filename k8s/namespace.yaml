@@ -1,0 +1,7 @@
+# Namespace for all Ops Dashboard resources.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fansfund-ops
+  labels:
+    app.kubernetes.io/part-of: ops-dashboard

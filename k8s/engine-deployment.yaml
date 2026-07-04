@@ -1,0 +1,73 @@
+# Dashboard Engine Deployment + ClusterIP Service.
+#
+# SECURITY NOTE: the engine API has NO authentication. It is intentionally
+# exposed only as a ClusterIP Service (`dashboard-engine`), reachable inside the
+# cluster and never published externally. Only the UI (NodePort) faces users;
+# the UI's Nginx proxies /api to this Service. Do not expose the engine directly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-engine
+  namespace: fansfund-ops
+  labels:
+    app: dashboard-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard-engine
+  template:
+    metadata:
+      labels:
+        app: dashboard-engine
+    spec:
+      containers:
+        - name: engine
+          image: fansfund-ops/dashboard-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # Inject every key from the Secret as an environment variable. The
+          # Secret is generated at deploy time from the environment / .env by
+          # scripts/create-secret.sh (never committed). REFRESH_INTERVAL_MINUTES
+          # is an OPTIONAL key there; when absent the engine defaults to 5
+          # minutes (clamped to 1-60).
+          envFrom:
+            - secretRef:
+                name: dashboard-engine-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-engine
+  namespace: fansfund-ops
+  labels:
+    app: dashboard-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard-engine
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Secrets / local environment — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# A populated copy of the Secret template must not be committed
+k8s/secrets.local.yaml
+
+# Logs / OS cruft
+*.log
+.DS_Store

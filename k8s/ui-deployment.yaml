@@ -1,0 +1,65 @@
+# Dashboard UI Deployment + NodePort Service.
+#
+# The UI pod runs Nginx serving the compiled SPA and proxying /api to the
+# in-cluster `dashboard-engine` ClusterIP Service. It is the only externally
+# reachable component, exposed on nodePort 30080.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-ui
+  namespace: fansfund-ops
+  labels:
+    app: dashboard-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard-ui
+  template:
+    metadata:
+      labels:
+        app: dashboard-ui
+    spec:
+      containers:
+        - name: ui
+          image: fansfund-ops/dashboard-ui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-ui
+  namespace: fansfund-ops
+  labels:
+    app: dashboard-ui
+spec:
+  type: NodePort
+  selector:
+    app: dashboard-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30080

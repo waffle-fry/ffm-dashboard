@@ -1,0 +1,20 @@
+{
+  "name": "fans-fund-me-core-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/engine",
+    "packages/ui"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "node scripts/run-tests.mjs",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "fast-check": "^3.22.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Enforce test wrapper",
+  "description": "Before any shell command runs, verify test execution goes through `npm test` (scripts/run-tests.mjs). If the command invokes Vitest directly (vitest, npx vitest, ./node_modules/.bin/vitest, or npm run test:watch), do not run it — rewrite it to use `npm test` (or `npm test -- <path>`) instead.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A shell command is about to run. Inspect it. If it executes tests by invoking Vitest directly in any form — `vitest`, `npx vitest`, `./node_modules/.bin/vitest`, `pnpm/yarn vitest`, or `npm run test:watch` — then STOP: do not run that command. It bypasses the hardened wrapper and can hang the session. Rewrite it to use the wrapper: `npm test` for the full suite, or `npm test -- <path-or-args>` for a subset, and run that instead. If the command does not run tests, or already uses `npm test`, proceed normally without changes."
+  }
+}
