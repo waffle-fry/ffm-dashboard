@@ -24,12 +24,13 @@
 import type { CreatorSpotlightMetrics, CreatorPayment } from '@fans-fund-me/shared';
 import type { CollectedMetrics, MetricCollector } from '../aggregator/scheduler.js';
 import { formatMoney } from '../utils/formatting.js';
+import { getStartOfDay } from '../utils/time-boundaries.js';
 
 /** The payment state that counts as a completed, successful payment. */
 export const SUCCEEDED_PAYMENT_STATE = 'succeeded';
 
 /** How many recent payments the spotlight surfaces (newest first). */
-export const RECENT_PAYMENTS_LIMIT = 6;
+export const RECENT_PAYMENTS_LIMIT = 10;
 
 /** Minor units per major unit (e.g. 100 pence per pound). */
 const MINOR_UNITS_PER_MAJOR = 100;
@@ -151,6 +152,8 @@ export function selectRecentPayments(
 export interface SpotlightCollectorOptions {
     /** Platform username to spotlight. */
     username: string;
+    /** Clock, injectable for deterministic tests (defaults to `new Date()`). */
+    now?: () => Date;
 }
 
 /**
@@ -166,14 +169,16 @@ export class SpotlightCollector implements MetricCollector {
 
     private readonly source: SpotlightSource;
     private readonly username: string;
+    private readonly now: () => Date;
 
     constructor(source: SpotlightSource, options: SpotlightCollectorOptions) {
         this.source = source;
         this.username = options.username;
+        this.now = options.now ?? (() => new Date());
     }
 
     async collect(): Promise<CollectedMetrics> {
-        const now = new Date();
+        const now = this.now();
         const lastRefreshed = now.toISOString();
         const profile = await this.source.getProfileByUsername(this.username);
 
@@ -189,6 +194,8 @@ export class SpotlightCollector implements MetricCollector {
                 succeededPaymentCount: 0,
                 totalPaymentCount: 0,
                 succeededPaymentValue: formatMoney(0),
+                dayPaymentCount: 0,
+                dayPaymentValue: formatMoney(0),
                 recentPayments: [],
                 balanceAvailable: null,
                 balancePending: null,
@@ -205,6 +212,13 @@ export class SpotlightCollector implements MetricCollector {
         ]);
 
         const totals = aggregatePayments(payments);
+        // "Today" = since UTC midnight, consistent with the rest of the dashboard's
+        // day boundary (Requirements 3.1/4.2). Reuses the pure aggregator over the
+        // subset of payments created on or after today's UTC midnight.
+        const startOfDayMs = getStartOfDay(now).getTime();
+        const dayTotals = aggregatePayments(
+            payments.filter((payment) => payment.createdUnixMilli >= startOfDayMs),
+        );
         const currency =
             profile.currency ?? payments[0]?.recipientCurrency ?? 'GBP';
 
@@ -238,6 +252,8 @@ export class SpotlightCollector implements MetricCollector {
             succeededPaymentCount: totals.succeededCount,
             totalPaymentCount: totals.totalCount,
             succeededPaymentValue: minorToFormatted(totals.succeededMinor),
+            dayPaymentCount: dayTotals.succeededCount,
+            dayPaymentValue: minorToFormatted(dayTotals.succeededMinor),
             recentPayments: selectRecentPayments(payments),
             balanceAvailable,
             balancePending,

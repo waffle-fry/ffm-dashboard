@@ -130,6 +130,21 @@ export default function CreatorSpotlightWidget({
                         />
                     </div>
 
+                    {/* Today's activity (since 00:00 UTC) */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <Stat
+                            label="Payments (today)"
+                            value={String(data.dayPaymentCount)}
+                        />
+                        <Stat
+                            label="Received (today)"
+                            value={formatCurrencyAmount(
+                                data.dayPaymentValue,
+                                data.currency,
+                            )}
+                        />
+                    </div>
+
                     {/* Stripe balance */}
                     <div>
                         {data.balanceError ? (

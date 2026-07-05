@@ -3,6 +3,7 @@ import {
     SpotlightCollector,
     aggregatePayments,
     selectRecentPayments,
+    RECENT_PAYMENTS_LIMIT,
     type SpotlightSource,
     type SpotlightProfile,
     type SpotlightPayment,
@@ -73,12 +74,31 @@ describe('selectRecentPayments', () => {
         selectRecentPayments(PAYMENTS);
         expect(PAYMENTS).toEqual(copy);
     });
+
+    it('defaults to a limit of 10, newest first', () => {
+        expect(RECENT_PAYMENTS_LIMIT).toBe(10);
+        // 14 payments, one per minute; the default selection keeps the newest 10.
+        const many: SpotlightPayment[] = Array.from({ length: 14 }, (_, i) => ({
+            state: 'succeeded',
+            recipientAmount: (i + 1) * 100,
+            recipientCurrency: 'GBP',
+            createdUnixMilli: T0 + i * 60_000,
+        }));
+        const recent = selectRecentPayments(many);
+        expect(recent).toHaveLength(10);
+        // Newest first: the last-created (i=13) is first.
+        expect(recent[0].amount).toBe('14.00');
+        expect(recent[9].amount).toBe('5.00');
+    });
 });
 
 describe('SpotlightCollector', () => {
     it('assembles the payload with payments and balance', async () => {
         const collector = new SpotlightCollector(makeSource(), {
             username: 'yourstraightbf',
+            // Pin "now" to just after the fixture payments so day metrics are
+            // deterministic (all PAYMENTS fall on the same UTC day as T0).
+            now: () => new Date(T0 + 5000),
         });
         const result = await collector.collect();
         const s = result.spotlight!;
@@ -87,6 +107,9 @@ describe('SpotlightCollector', () => {
         expect(s.succeededPaymentCount).toBe(2);
         expect(s.totalPaymentCount).toBe(4);
         expect(s.succeededPaymentValue).toBe('15.50');
+        // Both succeeded payments are on T0's UTC day -> today's totals match.
+        expect(s.dayPaymentCount).toBe(2);
+        expect(s.dayPaymentValue).toBe('15.50');
         expect(s.balanceAvailable).toBe('123.45');
         expect(s.balancePending).toBe('67.89');
         expect(s.balanceError).toBeNull();
@@ -95,6 +118,28 @@ describe('SpotlightCollector', () => {
         // Recent payments included, newest first.
         expect(s.recentPayments).toHaveLength(4);
         expect(s.recentPayments[0].amount).toBe('10.00');
+    });
+
+    it('counts and sums only succeeded payments received today (since UTC midnight)', async () => {
+        const dayStart = Date.parse('2026-07-05T00:00:00.000Z');
+        const payments: SpotlightPayment[] = [
+            // Today, succeeded -> counts.
+            { state: 'succeeded', recipientAmount: 500, recipientCurrency: 'GBP', createdUnixMilli: dayStart + 3_600_000 },
+            // Today, but not succeeded -> excluded from the count/value.
+            { state: 'requires_payment_method', recipientAmount: 999, recipientCurrency: 'GBP', createdUnixMilli: dayStart + 100 },
+            // Yesterday, succeeded -> counts for all-time but NOT today.
+            { state: 'succeeded', recipientAmount: 250, recipientCurrency: 'GBP', createdUnixMilli: dayStart - 3_600_000 },
+        ];
+        const collector = new SpotlightCollector(
+            makeSource({ getReceivedPayments: async () => payments }),
+            { username: 'yourstraightbf', now: () => new Date(dayStart + 7_200_000) },
+        );
+        const s = (await collector.collect()).spotlight!;
+        expect(s.dayPaymentCount).toBe(1);
+        expect(s.dayPaymentValue).toBe('5.00');
+        // All-time still counts both succeeded payments.
+        expect(s.succeededPaymentCount).toBe(2);
+        expect(s.succeededPaymentValue).toBe('7.50');
     });
 
     it('surfaces a balance error but still reports payments', async () => {

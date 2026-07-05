@@ -153,6 +153,11 @@ export interface CreatorSpotlightMetrics {
     /** Total value of successful payments received, 2dp in the creator's currency. */
     succeededPaymentValue: string;
 
+    /** Count of successful payments received today (since 00:00 UTC). */
+    dayPaymentCount: number;
+    /** Value of successful payments received today, 2dp in the creator's currency (since 00:00 UTC). */
+    dayPaymentValue: string;
+
     /** The creator's most recent payments (newest first), with state + timestamp. */
     recentPayments: CreatorPayment[];
 
