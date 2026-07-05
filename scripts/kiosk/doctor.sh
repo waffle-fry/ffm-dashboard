@@ -117,6 +117,42 @@ for label in "${AGENTS[@]}"; do
   fi
 done
 
+# --- Auto-update / git ------------------------------------------------------
+step "Auto-update (git)"
+BRANCH="${KIOSK_BRANCH:-main}"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  current_branch="$(git symbolic-ref --short -q HEAD || echo '(detached)')"
+  if [[ "$current_branch" == "$BRANCH" ]]; then
+    pass "checkout is on '${BRANCH}'"
+  else
+    fail "checkout is on '${current_branch}', not '${BRANCH}' — auto-update will skip (run: git checkout ${BRANCH})"
+  fi
+  # Remote reachability with the SAME credential path fetch uses. This is the
+  # most common auto-update failure: git works in your terminal (keychain/agent)
+  # but not in the non-interactive launchd environment.
+  if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
+    pass "origin/${BRANCH} reachable (git credentials work here)"
+    local_sha="$(git rev-parse HEAD 2>/dev/null)"
+    remote_sha="$(git ls-remote origin "$BRANCH" 2>/dev/null | awk '{print $1}')"
+    if [[ -n "$remote_sha" && "$local_sha" == "$remote_sha" ]]; then
+      pass "up to date with origin/${BRANCH} (${local_sha:0:12})"
+    else
+      note "behind origin/${BRANCH} (local ${local_sha:0:12} vs remote ${remote_sha:0:12}) — a healthy auto-update will deploy this"
+    fi
+  else
+    fail "cannot reach origin/${BRANCH} via git — auto-update's fetch will fail. In launchd there is no interactive login: use an HTTPS remote with a credential in the macOS keychain (git-credential-osxkeychain) or an SSH key loaded for this user."
+  fi
+  # Surface the tail of the auto-update log if present.
+  au_log="${HOME}/Library/Logs/fansfund-dashboard/com.fansfund.dashboard.autoupdate.out.log"
+  if [[ -f "$au_log" ]]; then
+    printf '    last auto-update log line: %s\n' "$(tail -n 1 "$au_log" 2>/dev/null)"
+  else
+    note "no auto-update log yet at $au_log (agent may not have run — check: make kiosk-install)"
+  fi
+else
+  fail "not a git work tree"
+fi
+
 # --- macOS power settings ---------------------------------------------------
 step "Power / display"
 displaysleep="$(pmset -g 2>/dev/null | awk '/displaysleep/{print $2; exit}')"

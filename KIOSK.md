@@ -113,3 +113,25 @@ make kiosk-uninstall
   state.
 - The end-to-end boot/kiosk behaviour must be verified on the device; it cannot
   be exercised in CI.
+
+## Troubleshooting
+
+**Auto-update never deploys pushed commits.** Run `make kiosk-doctor` — it
+checks the branch and whether git can reach the remote. The usual cause is
+**git credentials**: fetching works in your terminal (macOS keychain / an
+`ssh-agent` you started) but the auto-update runs from `launchd`, a
+non-interactive session with none of that. Fixes:
+
+- Use an **HTTPS remote** and store a token in the login keychain so
+  `git-credential-osxkeychain` serves it non-interactively:
+  `git config --global credential.helper osxkeychain`, then do one manual
+  `git fetch` and enter the token when prompted.
+- Or use an **SSH deploy key** whose private key needs no passphrase (or is in
+  the keychain), so `git@…` works without an agent.
+
+Also confirm the checkout is on `main`, and read the log at
+`~/Library/Logs/fansfund-dashboard/com.fansfund.dashboard.autoupdate.err.log` —
+the fetch error is now written there verbatim.
+
+**Force a check now:** `bash scripts/kiosk/auto-update.sh` (or `--check` for a
+dry run that only reports the decision).

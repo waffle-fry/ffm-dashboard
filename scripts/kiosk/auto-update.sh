@@ -56,13 +56,28 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
-if ! git fetch --quiet origin "$BRANCH" 2>/dev/null; then
-  log "git fetch failed (offline?); keeping current version"
+# Must be on the tracked branch so a fast-forward advances the branch ref (not a
+# detached HEAD). Skip loudly rather than risk a weird state.
+CURRENT_BRANCH="$(git symbolic-ref --short -q HEAD || echo '(detached)')"
+if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
+  log "checkout is on '${CURRENT_BRANCH}', not '${BRANCH}'; skipping (checkout ${BRANCH} to enable auto-update)"
+  exit 0
+fi
+
+# Fetch the remote branch tip. Do NOT swallow stderr: auth/network failures must
+# be visible in the log rather than silently reported as "offline".
+if ! git fetch origin "$BRANCH"; then
+  log "git fetch origin ${BRANCH} failed (network or git credentials in the launchd environment?); keeping current version"
   exit 0
 fi
 
 LOCAL="$(git rev-parse HEAD)"
-REMOTE="$(git rev-parse "origin/${BRANCH}")"
+# Use FETCH_HEAD — the tip that was just fetched — rather than the remote-
+# tracking ref origin/${BRANCH}, which is not guaranteed to update on every
+# `git fetch <remote> <branch>` and can leave us comparing against a stale ref.
+REMOTE="$(git rev-parse FETCH_HEAD)"
+
+log "local ${LOCAL:0:12} | remote ${REMOTE:0:12}"
 
 if [[ "$LOCAL" == "$REMOTE" ]]; then
   log "up to date at ${LOCAL:0:12}"
@@ -72,7 +87,7 @@ fi
 # Only deploy on a real fast-forward: local HEAD must be an ancestor of remote.
 # This rejects diverged history and force-pushes (12.7).
 if ! git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
-  log "origin/${BRANCH} is not a fast-forward of local HEAD; skipping (manual reconcile needed)"
+  log "${BRANCH} is not a fast-forward of local HEAD; skipping (manual reconcile needed)"
   exit 0
 fi
 
@@ -84,8 +99,10 @@ fi
 log "new commits on ${BRANCH}: ${LOCAL:0:12} -> ${REMOTE:0:12}; updating"
 
 # --- Pull, verify, deploy (12.6, 12.7) --------------------------------------
-if ! git pull --ff-only origin "$BRANCH"; then
-  log "git pull --ff-only failed; keeping current version"
+# Fast-forward to the already-fetched tip (no second network round-trip, and no
+# dependency on the tracking-ref state).
+if ! git merge --ff-only FETCH_HEAD; then
+  log "fast-forward merge failed; keeping current version"
   exit 1
 fi
 

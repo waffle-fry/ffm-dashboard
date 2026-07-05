@@ -458,6 +458,15 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
     - `scripts/kiosk/doctor.sh` + `make kiosk-doctor`: read-only checks (tooling, Docker, cluster + loopback port mapping, workloads, URL/API, required env, loaded LaunchAgents, display sleep) with PASS/WARN/FAIL and a non-zero exit on hard failures. Run and confirmed on the dev machine.
     - _Requirements: 12.1, 12.2, 12.3, 12.4_
 
+- [x] 22. Kiosk field fixes (header clock + auto-update robustness)
+  - [x] 22.1 Header "Updated X ago" froze on a fixed value
+    - `HeaderStatus` recomputed the relative label only on the data poll; since the UI poll and engine refresh share a period, the offset was constant. Added a 30s wall-clock tick so the label tracks real elapsed time.
+    - _Requirements: 8.2, 5.7_
+  - [x] 22.2 Auto-update never deployed pushed commits — hardened
+    - `auto-update.sh`: compare against `FETCH_HEAD` (not the possibly-stale `origin/<branch>` tracking ref); stop swallowing `git fetch` stderr so credential/network failures are logged; add a tracked-branch guard; fast-forward via `git merge --ff-only FETCH_HEAD`.
+    - `doctor.sh`: added a Git/auto-update section (branch check, `git ls-remote` reachability with the launchd credential caveat, ahead/behind, last log line). KIOSK.md troubleshooting for git credentials under launchd.
+    - _Requirements: 12.5, 12.6, 12.7_
+
 
 
 ## Notes

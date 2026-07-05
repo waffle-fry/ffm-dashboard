@@ -11,16 +11,30 @@
 // with a ⚠. Relative-time formatting reuses the tested helpers in ./time-format.
 
 import type { PlatformSummaryMetrics } from '@fans-fund-me/shared';
+import { useEffect, useState } from 'react';
 import { useMetrics } from '../hooks/useMetrics';
 import { useRefresh } from '../hooks/useRefresh';
 import { formatMinutesAgo, minutesAgo } from './time-format';
+
+/** How often the "Updated X ago" label re-evaluates against the wall clock. */
+const TICK_MS = 30_000;
 
 export default function HeaderStatus(): JSX.Element {
     const { lastRefreshed, isStale, isLoading, refetch } =
         useMetrics<PlatformSummaryMetrics>('summary');
     const { refreshAll, isRefreshing } = useRefresh();
 
-    const minutes = minutesAgo(lastRefreshed, Date.now());
+    // The data only polls every few minutes, so recomputing "X min ago" on
+    // render alone would freeze the label between polls (and, because the poll
+    // and the engine refresh share a period, always show the same offset). Tick
+    // a clock so the relative label tracks real elapsed time.
+    const [now, setNow] = useState<number>(() => Date.now());
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), TICK_MS);
+        return () => clearInterval(id);
+    }, []);
+
+    const minutes = minutesAgo(lastRefreshed, now);
     const label =
         minutes === null ? 'Awaiting data' : `Updated ${formatMinutesAgo(minutes)}`;
     const busy = isLoading || isRefreshing('all');
