@@ -11,14 +11,14 @@
 // and a background-to-body-text contrast ratio of at least 4.5:1.
 
 export const brandColors = {
-    /** Dark app background. */
-    background: '#0F1115',
-    /** Slightly raised panel background (widgets). */
-    surface: '#181B22',
-    /** Further raised surface (hover / nested panels). */
-    surfaceRaised: '#20242E',
+    /** Dark app background — matches the FFM logo's black panel (#1E1E1E). */
+    background: '#1E1E1E',
+    /** Slightly raised panel background (widgets/cards). */
+    surface: '#262626',
+    /** Further raised surface (hover / nested panels / stat tiles). */
+    surfaceRaised: '#303030',
     /** Subtle borders and dividers. */
-    border: '#2A2F3A',
+    border: '#3A3A3A',
     /** Primary body/light text — high contrast against the background. */
     textPrimary: '#F5F5F7',
     /** Secondary/muted text — still meets 4.5:1 against the background. */
