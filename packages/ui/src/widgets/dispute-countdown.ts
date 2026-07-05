@@ -151,3 +151,13 @@ export function describeDisputeDays(daysRemaining: number): DisputeDaysView {
 export function formatDisputeAmount(amountUsd: DisputeItem['amountUsd']): string {
     return `$${amountUsd}`;
 }
+
+/**
+ * Format the open-disputes count for the Dispute Deadlines widget header,
+ * pluralised (Requirement 6.9): "1 open dispute" / "N open disputes". Zero is
+ * handled for completeness, though the widget shows the "No open disputes"
+ * countdown empty-state instead of this header when the count is zero.
+ */
+export function formatOpenDisputesCount(count: number): string {
+    return count === 1 ? '1 open dispute' : `${count} open disputes`;
+}

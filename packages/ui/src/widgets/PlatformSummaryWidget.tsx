@@ -29,13 +29,16 @@
 
 import type { PlatformSummaryMetrics } from '@fans-fund-me/shared';
 import Widget from '../components/Widget';
-import { formatCurrency } from '../components/currency';
+import { formatCurrency, formatCurrencyAmount } from '../components/currency';
 import { periodDateLabels } from '../components/period-dates';
 import { useMetrics } from '../hooks/useMetrics';
 import { useRefresh } from '../hooks/useRefresh';
 
 /** Sentinel shown when the take rate is unavailable (gross volume is zero). */
 export const TAKE_RATE_UNAVAILABLE = 'N/A';
+
+/** Shown on a balance tile when the figure could not be produced. */
+export const BALANCE_UNAVAILABLE = 'Unavailable';
 
 /**
  * Prefix a backend-formatted USD amount string (already 2dp, e.g. "1234.56")
@@ -73,8 +76,10 @@ export interface SummaryStat {
 }
 
 /**
- * Map PlatformSummaryMetrics to the five display stats in a stable order. Pure
- * and DOM-free so it can be unit-tested directly (Requirements 10.1–10.4).
+ * Map PlatformSummaryMetrics to the four month-to-date display stats in a
+ * stable order. Pure and DOM-free so it can be unit-tested directly
+ * (Requirements 10.1–10.4). The open-disputes count now lives on the Dispute
+ * Deadlines widget (Requirement 6.9), so it is intentionally not shown here.
  */
 export function buildSummaryStats(data: PlatformSummaryMetrics): SummaryStat[] {
     return [
@@ -87,16 +92,66 @@ export function buildSummaryStats(data: PlatformSummaryMetrics): SummaryStat[] {
             value: formatTakeRate(data.monthlyTakeRate),
         },
         {
-            label: 'Open Disputes',
-            value: String(data.openDisputes),
-        },
-        {
             label: 'Dispute Rate (This Month)',
             value: formatDisputeRate(data.monthlyDisputeRate),
         },
         {
             label: 'Payments (This Month)',
             value: String(data.monthlyPaymentCount),
+        },
+    ];
+}
+
+/** A single platform-balance tile, with an optional per-tile error. */
+export interface BalanceStat {
+    /** Human-readable label. */
+    label: string;
+    /** Display-ready value, or {@link BALANCE_UNAVAILABLE} when not available. */
+    value: string;
+    /** Non-fatal error message for this tile, or null. */
+    error: string | null;
+}
+
+/**
+ * Map the platform-balance fields of PlatformSummaryMetrics to the four balance
+ * tiles in a stable order (Requirement 11.6): Stripe (USD), Mercury (USD), total
+ * (USD), and total (GBP). USD figures use the business currency symbol; the GBP
+ * total uses the pound symbol. Amounts are shown verbatim — never re-rounded.
+ * Pure and DOM-free for direct unit testing.
+ */
+export function buildBalanceStats(data: PlatformSummaryMetrics): BalanceStat[] {
+    return [
+        {
+            label: 'Stripe Balance (USD)',
+            value:
+                data.stripeBalanceUsd === null
+                    ? BALANCE_UNAVAILABLE
+                    : formatCurrency(data.stripeBalanceUsd),
+            error: data.stripeBalanceError,
+        },
+        {
+            label: 'Mercury Balance (USD)',
+            value:
+                data.mercuryBalanceUsd === null
+                    ? BALANCE_UNAVAILABLE
+                    : formatCurrency(data.mercuryBalanceUsd),
+            error: data.mercuryBalanceError,
+        },
+        {
+            label: 'Total Balance (USD)',
+            value:
+                data.totalBalanceUsd === null
+                    ? BALANCE_UNAVAILABLE
+                    : formatCurrency(data.totalBalanceUsd),
+            error: null,
+        },
+        {
+            label: 'Total Balance (GBP)',
+            value:
+                data.totalBalanceGbp === null
+                    ? BALANCE_UNAVAILABLE
+                    : formatCurrencyAmount(data.totalBalanceGbp, 'GBP'),
+            error: null,
         },
     ];
 }
@@ -120,6 +175,7 @@ export default function PlatformSummaryWidget({
     };
 
     const stats = data ? buildSummaryStats(data) : [];
+    const balanceStats = data ? buildBalanceStats(data) : [];
 
     return (
         <Widget
@@ -149,6 +205,33 @@ export default function PlatformSummaryWidget({
                                 <dd className="font-heading text-lg tabular-nums text-text-primary">
                                     {stat.value}
                                 </dd>
+                            </div>
+                        ))}
+                    </dl>
+
+                    <p className="mt-1 text-xs text-text-secondary">
+                        Platform balances
+                    </p>
+                    <dl className="grid grid-cols-2 gap-3">
+                        {balanceStats.map((stat) => (
+                            <div
+                                key={stat.label}
+                                className="flex flex-col gap-1 rounded border border-border bg-surface-raised px-3 py-2"
+                            >
+                                <dt className="text-xs text-text-secondary">
+                                    {stat.label}
+                                </dt>
+                                <dd className="font-heading text-lg tabular-nums text-text-primary">
+                                    {stat.value}
+                                </dd>
+                                {stat.error !== null && (
+                                    <p
+                                        className="text-xs text-danger"
+                                        title={stat.error}
+                                    >
+                                        ⚠ Unavailable
+                                    </p>
+                                )}
                             </div>
                         ))}
                     </dl>

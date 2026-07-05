@@ -58,6 +58,10 @@ import type {
     StripeBalanceTransactionRecord,
     StripeChargeRecord,
     StripeDisputeRecord,
+    StripePlatformBalanceEntry,
+    PlatformBalanceProvider,
+    MercuryClientPort,
+    CurrencyConverter,
 } from '../collectors/stripe-collector.js';
 import type {
     MongoClientPort,
@@ -77,6 +81,7 @@ import type {
 import {
     DISPUTE_DOCS_BUCKET,
 } from '../collectors/s3-collector.js';
+import { convertViaRates } from '../utils/balances.js';
 import type {
     SpotlightSource,
     SpotlightProfile,
@@ -127,7 +132,7 @@ function toIso(value: unknown): string {
  * SDK. The SDK client is constructed lazily on first use so merely importing
  * this module does not require configuration.
  */
-export class StripeClient implements StripeClientPort {
+export class StripeClient implements StripeClientPort, PlatformBalanceProvider {
     private readonly apiKey: string | undefined;
     private client: Stripe | undefined;
 
@@ -207,6 +212,21 @@ export class StripeClient implements StripeClientPort {
         return charges.data.map((charge) => this.toChargeRecord(charge));
     }
 
+    /**
+     * Reads the platform's OWN Stripe balance (no `stripeAccount` option, so it
+     * targets the platform account rather than a connected account). Returns the
+     * available balance as one entry per currency (minor units). Requires the
+     * API key to have `balance` read access. (Req 11.1)
+     */
+    async getPlatformBalance(): Promise<StripePlatformBalanceEntry[]> {
+        const stripe = this.sdk();
+        const balance = await stripe.balance.retrieve();
+        return (balance.available ?? []).map((entry) => ({
+            currency: entry.currency,
+            amount: entry.amount,
+        }));
+    }
+
     /** Maps a Stripe charge to the narrow record shape the collector consumes. */
     private toChargeRecord(charge: Stripe.Charge): StripeChargeRecord {
         return {
@@ -218,6 +238,131 @@ export class StripeClient implements StripeClientPort {
             refunded: charge.refunded,
             amount_refunded: charge.amount_refunded,
         };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mercury (platform bank balance)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mercury adapter. Mercury ships no server SDK, so this talks to its HTTP API
+ * directly with native `fetch`. Reads `MERCURY_API_TOKEN` and returns the total
+ * available balance across the platform's Mercury accounts, in USD major units
+ * (Mercury reports balances as USD dollar amounts). Throws
+ * {@link SourceNotConfiguredError} when the token is unset so the summary shows
+ * a per-tile error rather than failing the whole widget (Req 11.2, 11.8).
+ */
+export class MercuryClient implements MercuryClientPort {
+    private static readonly ACCOUNTS_URL = 'https://api.mercury.com/api/v1/accounts';
+
+    private readonly token: string | undefined;
+
+    constructor() {
+        this.token = env('MERCURY_API_TOKEN');
+    }
+
+    async getBalanceUsd(): Promise<number> {
+        if (this.token === undefined) {
+            throw new SourceNotConfiguredError('Mercury', 'MERCURY_API_TOKEN');
+        }
+        const response = await fetch(MercuryClient.ACCOUNTS_URL, {
+            headers: { Authorization: `Bearer ${this.token}` },
+        });
+        if (!response.ok) {
+            throw new Error(
+                `Mercury API request failed (${response.status} ${response.statusText}).`,
+            );
+        }
+        const body = (await response.json()) as {
+            accounts?: Array<{ availableBalance?: number; currentBalance?: number }>;
+        };
+        const accounts = body.accounts ?? [];
+        return accounts.reduce((sum, account) => {
+            const balance =
+                typeof account.availableBalance === 'number'
+                    ? account.availableBalance
+                    : 0;
+            return sum + balance;
+        }, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Currency conversion (Payments.ExchangeRates)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exchange-rate converter backed by the `ExchangeRates` collection in the
+ * `Payments` MongoDB database. Each document is `{ _id: <ISO 4217 code>, rate:
+ * <units per 1 USD, as a string> }` (USD itself is "1"). Rates are loaded once
+ * and cached for {@link ExchangeRateConverter.CACHE_TTL_MS} since FX rates move
+ * slowly relative to the dashboard's polling interval. The arithmetic lives in
+ * the pure {@link convertViaRates} helper so it stays unit-testable.
+ */
+export class ExchangeRateConverter implements CurrencyConverter {
+    /** How long a loaded rate table is reused before refetching. */
+    private static readonly CACHE_TTL_MS = 10 * 60 * 1000;
+
+    private readonly uri: string | undefined;
+    private connection: Promise<MongoDriver> | undefined;
+    private rates: Map<string, number> | undefined;
+    private ratesLoadedAt = 0;
+
+    constructor() {
+        this.uri = env('MONGODB_URI');
+    }
+
+    private client(): Promise<MongoDriver> {
+        if (this.uri === undefined) {
+            throw new SourceNotConfiguredError('ExchangeRates', 'MONGODB_URI');
+        }
+        if (this.connection === undefined) {
+            const uri = this.uri;
+            this.connection = (async () => {
+                const client = new MongoDriver(uri);
+                await client.connect();
+                return client;
+            })().catch((error) => {
+                this.connection = undefined;
+                throw error;
+            });
+        }
+        return this.connection;
+    }
+
+    /** Loads (and memoises) the ISO-code → units-per-USD rate table. */
+    private async loadRates(): Promise<Map<string, number>> {
+        const now = Date.now();
+        if (
+            this.rates !== undefined &&
+            now - this.ratesLoadedAt < ExchangeRateConverter.CACHE_TTL_MS
+        ) {
+            return this.rates;
+        }
+        const client = await this.client();
+        const docs = await client
+            .db('Payments')
+            .collection('ExchangeRates')
+            .find({}, { projection: { rate: 1 } })
+            .toArray();
+        const rates = new Map<string, number>();
+        for (const doc of docs) {
+            const code = String(doc._id).toUpperCase();
+            const rate =
+                typeof doc.rate === 'number' ? doc.rate : Number.parseFloat(String(doc.rate));
+            if (Number.isFinite(rate)) {
+                rates.set(code, rate);
+            }
+        }
+        this.rates = rates;
+        this.ratesLoadedAt = now;
+        return rates;
+    }
+
+    async convert(amount: number, from: string, to: string): Promise<number | null> {
+        const rates = await this.loadRates();
+        return convertViaRates(amount, from, to, rates);
     }
 }
 

@@ -24,6 +24,8 @@ import {
     GrafanaClient,
     S3Client,
     SpotlightClient,
+    MercuryClient,
+    ExchangeRateConverter,
 } from './clients/source-clients.js';
 import { consoleLogger } from './utils/log.js';
 
@@ -89,8 +91,18 @@ export function buildEngine(): EngineDependencies {
         getOpenDisputes: (): OpenDisputeInput[] => [],
     });
 
+    // The Stripe client also serves the platform's own balance; Mercury and the
+    // ExchangeRates-backed converter provide the bank balance and FX for the
+    // platform-balance tiles on the summary widget (Req 11).
+    const stripeClient = new StripeClient();
+
     const collectors: MetricCollector[] = [
-        new StripeCollector(new StripeClient(), { evidenceProvider: s3Evidence }),
+        new StripeCollector(stripeClient, {
+            evidenceProvider: s3Evidence,
+            balanceProvider: stripeClient,
+            mercuryClient: new MercuryClient(),
+            converter: new ExchangeRateConverter(),
+        }),
         new MongoCollector(new MongoClient()),
         new GrafanaCollector(new GrafanaClient()),
         // Single-creator spotlight panel. The username is configurable via

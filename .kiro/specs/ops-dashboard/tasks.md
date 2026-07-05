@@ -375,6 +375,51 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
 - [x] 16. Final checkpoint - Full integration
   - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 17. Platform account balances (Requirement 11)
+  - [x] 17.1 Extend shared model with balance fields
+    - Extend `PlatformSummaryMetrics` in `packages/shared/src/models.ts` with `stripeBalanceUsd`, `stripeBalanceError`, `mercuryBalanceUsd`, `mercuryBalanceError`, `totalBalanceUsd`, `totalBalanceGbp` (all `string | null`)
+    - _Requirements: 11.1, 11.2, 11.4, 11.5, 11.7, 11.8, 11.9_
+
+  - [x] 17.2 Implement CurrencyConverter (ExchangeRates)
+    - Add a `CurrencyConverter` port with `convert(amount, from, to): Promise<number | null>` to the engine
+    - Implement a Mongo-backed adapter in `packages/engine/src/clients/source-clients.ts` reading the `ExchangeRates` collection in the `Payments` database (confirm the document shape via a temporary read-only inspection script that never prints secrets, then delete it)
+    - Same-currency is identity; missing rate returns null
+    - _Requirements: 11.3, 11.5, 11.10_
+
+  - [x] 17.3 Add platform Stripe balance read + MercuryClient
+    - Extend `StripeClientPort`/`StripeClient` with `getPlatformBalance()` returning available amounts per currency (via `stripe.balance.retrieve()`, no `stripeAccount`)
+    - Add a `MercuryClientPort` and `MercuryClient` in `source-clients.ts` calling `GET https://api.mercury.com/api/v1/accounts` with `MERCURY_API_TOKEN`; sum `availableBalance` across accounts (USD)
+    - Throw `SourceNotConfiguredError` when the token/permission is absent
+    - _Requirements: 11.1, 11.2_
+
+  - [x] 17.4 Fold balances into the summary metric with graceful errors
+    - In `packages/engine/src/collectors/stripe-collector.ts`, inject the Mercury port + CurrencyConverter; after building `summary`, read the Stripe platform balance and Mercury balance in independent try/catch blocks
+    - Convert the Stripe balance (per-currency) to USD; sum to `totalBalanceUsd` from available USD amounts (null when none); convert the USD total to GBP for `totalBalanceGbp`
+    - Populate `stripeBalanceError`/`mercuryBalanceError` on failure without failing the widget
+    - Wire the new ports/converter in `buildEngine` (`server.ts`)
+    - _Requirements: 11.1–11.10_
+
+  - [x]* 17.5 Property test for currency conversion (Property 26)
+    - **Property 26: Currency conversion** — identity for same currency, amount×rate (2dp) when a rate exists, null when no rate
+    - **Validates: Requirements 11.3, 11.5, 11.10**
+
+  - [x]* 17.6 Property test for total balance summation (Property 27)
+    - **Property 27: Total platform balance summation** — sum of available USD amounts, null when none available
+    - **Validates: Requirements 11.4, 11.9**
+
+  - [x] 17.7 Render four balance tiles on PlatformSummaryWidget
+    - Extend `buildSummaryStats()` in `packages/ui/src/widgets/PlatformSummaryWidget.tsx` with Stripe Balance (USD), Mercury Balance (USD), Total Balance (USD), and Total Balance (GBP) tiles (USD via `formatCurrency`; GBP via `formatCurrencyAmount(value, 'GBP')`)
+    - Surface per-tile error indicators for `stripeBalanceError`/`mercuryBalanceError`; show totals as unavailable when null
+    - Update `PlatformSummaryWidget.test.ts` (asserts the exact `buildSummaryStats` output) and `server.integration.test.ts` `summaryPayload()` for the new shape
+    - _Requirements: 11.6, 11.7, 11.8, 11.9_
+
+  - [x] 17.8 Deployment config for MERCURY_API_TOKEN
+    - Add `MERCURY_API_TOKEN` to `.env.example`, the OPTIONAL_VARS in `scripts/deploy-lib.sh`, and the create-secret flow
+    - _Requirements: 11.2_
+
+- [x] 18. Checkpoint - Platform account balances
+  - Build, run `npm test`, deploy engine + UI, verify live via `/api/metrics/summary` and a browser check.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

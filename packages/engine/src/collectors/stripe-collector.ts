@@ -38,6 +38,7 @@ import type { CollectedMetrics, MetricCollector } from '../aggregator/scheduler.
 import type { MetricKey } from '../cache/metrics-cache.js';
 
 import { calculateAverage, calculateDisputeRate, calculateTakeRate } from '../utils/calculations.js';
+import { sumUsdBalances } from '../utils/balances.js';
 import { calculateDaysRemaining, isOpenDispute } from '../utils/disputes.js';
 import { formatMoney } from '../utils/formatting.js';
 import {
@@ -177,6 +178,43 @@ export interface StripeClientPort {
     listDisputes(params: { createdGte: number }): Promise<StripeDisputeRecord[]>;
     /** Most recent charges, newest first, up to `limit`. */
     listRecentCharges(params: { limit: number }): Promise<StripeChargeRecord[]>;
+}
+
+/** A single currency entry of the platform's own Stripe available balance. */
+export interface StripePlatformBalanceEntry {
+    /** ISO 4217 currency code as reported by Stripe (lowercase, e.g. "gbp"). */
+    currency: string;
+    /** Available amount in that currency, minor units (e.g. pence). */
+    amount: number;
+}
+
+/**
+ * Reads the platform's OWN Stripe balance (not a connected account). Injected
+ * into {@link StripeCollector} so the platform balance can be folded into the
+ * summary metric. Separate from {@link StripeClientPort} to keep that port —
+ * and its many test fakes — focused on the aggregation reads; the production
+ * {@link StripeClient} implements both.
+ */
+export interface PlatformBalanceProvider {
+    /** The platform account's available balance, one entry per currency. */
+    getPlatformBalance(): Promise<StripePlatformBalanceEntry[]>;
+}
+
+/**
+ * Reads the platform's Mercury bank balance. Returns the total available
+ * balance across the platform's Mercury accounts, in USD major units.
+ */
+export interface MercuryClientPort {
+    getBalanceUsd(): Promise<number>;
+}
+
+/**
+ * Converts a major-unit amount between ISO 4217 currencies using the platform's
+ * stored exchange rates. Returns null when a required rate is unavailable so the
+ * caller can mark the figure unavailable rather than fabricate one.
+ */
+export interface CurrencyConverter {
+    convert(amount: number, from: string, to: string): Promise<number | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +379,23 @@ export interface StripeCollectorOptions {
      * S3. A failure here never breaks the Stripe metrics (see {@link StripeCollector.collect}).
      */
     evidenceProvider?: DisputeEvidenceProvider;
+    /**
+     * Optional reader for the platform's own Stripe balance (Req 11.1). When
+     * supplied together with {@link StripeCollectorOptions.converter}, the
+     * platform Stripe balance is converted to USD and folded into the summary.
+     */
+    balanceProvider?: PlatformBalanceProvider;
+    /**
+     * Optional Mercury bank-balance reader (Req 11.2). When supplied, the
+     * Mercury balance is folded into the summary (already in USD).
+     */
+    mercuryClient?: MercuryClientPort;
+    /**
+     * Optional currency converter (Req 11.3, 11.5) used to convert the Stripe
+     * balance to USD and the USD total to GBP. Required for the Stripe balance
+     * and the GBP total; when absent those figures are reported as unavailable.
+     */
+    converter?: CurrencyConverter;
 }
 
 /**
@@ -367,6 +422,9 @@ export class StripeCollector implements MetricCollector {
     private readonly overlapSec: number;
     private readonly disputeLookbackSec: number;
     private readonly evidenceProvider: DisputeEvidenceProvider | undefined;
+    private readonly balanceProvider: PlatformBalanceProvider | undefined;
+    private readonly mercuryClient: MercuryClientPort | undefined;
+    private readonly converter: CurrencyConverter | undefined;
 
     constructor(client: StripeClientPort, options: StripeCollectorOptions = {}) {
         this.client = client;
@@ -374,6 +432,9 @@ export class StripeCollector implements MetricCollector {
         this.overlapSec = options.overlapSec ?? DEFAULT_OVERLAP_SEC;
         this.disputeLookbackSec = options.disputeLookbackSec ?? DEFAULT_DISPUTE_LOOKBACK_SEC;
         this.evidenceProvider = options.evidenceProvider;
+        this.balanceProvider = options.balanceProvider;
+        this.mercuryClient = options.mercuryClient;
+        this.converter = options.converter;
     }
 
     async collect(): Promise<CollectedMetrics> {
@@ -477,12 +538,18 @@ export class StripeCollector implements MetricCollector {
 
         // Platform summary (Req 10.1-10.4).
         const monthlyDisputeCount = countDisputesInPeriod(disputes, startOfMonth, now);
+
+        // Platform account balances (Req 11). Each source is read independently
+        // with its own error isolation so one failure never blanks the others
+        // (mirrors the S3 `evidenceError` pattern above).
+        const balances = await this.collectBalances();
+
         const summary: PlatformSummaryMetrics = {
             monthlyGrossVolume: formatMoney(monthTotals.positiveGross),
             monthlyTakeRate: calculateTakeRate(monthTotals.fees, monthTotals.gross),
-            openDisputes: disputeItems.length,
             monthlyDisputeRate: calculateDisputeRate(monthlyDisputeCount, monthTotals.successful),
             monthlyPaymentCount: monthTotals.successful,
+            ...balances,
             lastRefreshed,
         };
 
@@ -491,6 +558,92 @@ export class StripeCollector implements MetricCollector {
             disputes: disputeMetrics,
             transactions,
             summary,
+        };
+    }
+
+    /**
+     * Reads the platform's Stripe and Mercury balances and derives the USD/GBP
+     * totals (Requirement 11). Returns the balance subset of
+     * {@link PlatformSummaryMetrics}.
+     *
+     * Each source is wrapped in its own try/catch so a failure in one (missing
+     * permission, missing token, missing FX rate) surfaces only on that tile's
+     * error field while the other balance — and the rest of the summary — keep
+     * rendering (Req 11.7, 11.8). The totals are computed from whatever numeric
+     * balances are available and are null when none are (Req 11.9).
+     */
+    private async collectBalances(): Promise<
+        Pick<
+            PlatformSummaryMetrics,
+            | 'stripeBalanceUsd'
+            | 'stripeBalanceError'
+            | 'mercuryBalanceUsd'
+            | 'mercuryBalanceError'
+            | 'totalBalanceUsd'
+            | 'totalBalanceGbp'
+        >
+    > {
+        let stripeUsd: number | null = null;
+        let stripeBalanceError: string | null = null;
+        let mercuryUsd: number | null = null;
+        let mercuryBalanceError: string | null = null;
+
+        // Platform's own Stripe balance, summed per-currency and converted to USD.
+        if (this.balanceProvider !== undefined) {
+            try {
+                if (this.converter === undefined) {
+                    throw new Error('currency converter unavailable');
+                }
+                const entries = await this.balanceProvider.getPlatformBalance();
+                let total = 0;
+                for (const entry of entries) {
+                    const usd = await this.converter.convert(
+                        minorToMajor(entry.amount),
+                        entry.currency,
+                        'USD',
+                    );
+                    if (usd === null) {
+                        throw new Error(
+                            `no exchange rate to convert ${entry.currency.toUpperCase()} balance to USD`,
+                        );
+                    }
+                    total += usd;
+                }
+                stripeUsd = total;
+            } catch (error) {
+                stripeBalanceError = error instanceof Error ? error.message : String(error);
+            }
+        }
+
+        // Mercury bank balance (already USD).
+        if (this.mercuryClient !== undefined) {
+            try {
+                mercuryUsd = await this.mercuryClient.getBalanceUsd();
+            } catch (error) {
+                mercuryBalanceError = error instanceof Error ? error.message : String(error);
+            }
+        }
+
+        const totalUsd = sumUsdBalances([stripeUsd, mercuryUsd]);
+
+        // GBP view of the total (Req 11.5). Best-effort: an unavailable rate or
+        // converter simply leaves the GBP total null.
+        let totalGbp: number | null = null;
+        if (totalUsd !== null && this.converter !== undefined) {
+            try {
+                totalGbp = await this.converter.convert(totalUsd, 'USD', 'GBP');
+            } catch {
+                totalGbp = null;
+            }
+        }
+
+        return {
+            stripeBalanceUsd: stripeUsd === null ? null : formatMoney(stripeUsd),
+            stripeBalanceError,
+            mercuryBalanceUsd: mercuryUsd === null ? null : formatMoney(mercuryUsd),
+            mercuryBalanceError,
+            totalBalanceUsd: totalUsd === null ? null : formatMoney(totalUsd),
+            totalBalanceGbp: totalGbp === null ? null : formatMoney(totalGbp),
         };
     }
 }

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ops-dashboard is a full-stack operational dashboard for the FansFund team. It consolidates real-time business metrics from four external data sources (MongoDB, Stripe, Grafana, AWS S3) into a single branded interface displayed on a 25" monitor (1920x1080) connected to a Mac Mini running in a local Kubernetes cluster.
+The ops-dashboard is a full-stack operational dashboard for the FansFund team. It consolidates real-time business metrics from five external data sources (MongoDB, Stripe, Grafana, AWS S3, Mercury) into a single branded interface displayed on a 25" monitor (1920x1080) connected to a Mac Mini running in a local Kubernetes cluster.
 
 The system is composed of two main deployable units:
 1. **Dashboard UI** — A React single-page application rendered in a browser (kiosk mode) on the Mac Mini
@@ -41,6 +41,7 @@ graph TB
         Stripe[Stripe API]
         Grafana[Grafana API]
         S3[AWS S3]
+        Mercury[Mercury API]
     end
 
     UI -->|REST API| Engine
@@ -48,6 +49,7 @@ graph TB
     Engine -->|HTTPS| Stripe
     Engine -->|HTTPS| Grafana
     Engine -->|AWS SDK| S3
+    Engine -->|HTTPS| Mercury
 ```
 
 ### Data Flow
@@ -140,7 +142,7 @@ interface WidgetProps {
 - `PaymentCountWidget` — Success/failed/refund counts
 - `UserGrowthWidget` — Creator/Fan totals and new registrations
 - `SystemHealthWidget` — Service status, uptime, error rate, latency
-- `DisputeCountdownWidget` — Days until nearest deadline, dispute list
+- `DisputeCountdownWidget` — Days until nearest deadline, open dispute count, dispute list
 - `DisputeProgressWidget` — Two-step progress indicators per dispute
 - `TransactionFeedWidget` — Scrollable list of recent payments
 - `PlatformSummaryWidget` — Lifetime volume, take rate, dispute rate
@@ -177,10 +179,25 @@ interface CollectorResult<T> {
 ```
 
 Implementations:
-- `StripeCollector` — Revenue, payments, disputes, recent transactions
+- `StripeCollector` — Revenue, payments, disputes, recent transactions, platform summary, and the platform's own Stripe available balance
 - `MongoCollector` — User/Creator counts and growth
 - `GrafanaCollector` — Service health, uptime, alerts
 - `S3Collector` — Dispute evidence file checks
+- `MercuryCollector` — The platform's Mercury bank balance
+
+The platform-balance figures (Requirement 11) are folded into the `summary` metric so they render on the existing Platform Summary widget. Because balances come from two independent sources (Stripe and Mercury) with independent failure modes, the `StripeCollector` owns the `summary` metric and is given two injected ports — the existing `StripeClientPort` (extended with a platform-balance read) and a new `MercuryClientPort` — plus a `CurrencyConverter`. Each balance read is wrapped in its own try/catch so a failure in one populates only that tile's error field, following the established graceful per-source error pattern (mirrors `DisputeMetrics.evidenceError` and `CreatorSpotlightMetrics.balanceError`).
+
+#### CurrencyConverter
+Converts a major-unit amount between ISO 4217 currencies using rates from the `ExchangeRates` collection in the `Payments` MongoDB database. A same-currency conversion is an identity. When a required rate is missing, conversion returns `null` so the caller can mark the affected figure (and its contribution to the total) unavailable rather than fabricating a number. Used to convert the platform Stripe balance to USD (Req 11.1/11.3) and the USD total to GBP (Req 11.5).
+
+```typescript
+interface CurrencyConverter {
+  // Returns the `to`-currency major-unit amount, or null when no rate exists.
+  convert(amount: number, from: string, to: string): Promise<number | null>;
+}
+```
+
+The exact `ExchangeRates` document shape is confirmed by a read-only inspection during implementation; the converter isolates that shape behind this port so the summary aggregation stays unit-testable with a stub.
 
 #### 3. MetricsCache
 In-memory store keyed by widget/metric type. Retains last-successful data to serve during source failures.
@@ -236,6 +253,18 @@ RESTful endpoints serving cached metrics to the UI:
 - **Auth**: IAM credentials via K8s Secret (or IRSA if available). Optionally assumes an IAM role via STS (`sts:AssumeRole`) when `AWS_ROLE_ARN` is set, using the base credentials to obtain auto-refreshing temporary credentials for the bucket.
 - **Bucket**: `fans-fund-me-core-dispute-docs`
 - **Operations**: `ListObjectsV2` to check for evidence files at `batches/<number>/<payment-id>/`
+
+#### Mercury Integration
+- **Method**: Mercury HTTP API via native `fetch` (Mercury ships no server SDK)
+- **Auth**: API token via K8s Secret (`MERCURY_API_TOKEN`), sent as `Authorization: Bearer <token>`
+- **Endpoint used**: `GET https://api.mercury.com/api/v1/accounts` — returns the platform's bank accounts, each with `availableBalance`/`currentBalance` (USD, major units)
+- **Balance**: The platform Mercury balance is the sum of the `availableBalance` across the returned accounts, in USD
+- **Degraded state**: When `MERCURY_API_TOKEN` is unset the adapter throws `SourceNotConfiguredError`, which the collector catches and records as `mercuryBalanceError` — the rest of the summary is unaffected
+
+#### Platform Stripe Balance (Requirement 11.1)
+- **SDK**: `stripe` npm package (`stripe.balance.retrieve()` — no `stripeAccount` option, so it reads the platform account's own balance)
+- **Currencies**: the balance's `available[]` array carries one entry per currency; the platform's available balance is summed per currency and each non-USD entry converted to USD via the `CurrencyConverter`
+- **Permission**: requires the API key to have `balance` read access; a failure is caught and recorded as `stripeBalanceError`
 
 ---
 
@@ -378,13 +407,21 @@ interface TransactionItem {
   timestamp: string;      // ISO 8601 with timezone
 }
 
-// Platform Summary (Req 10)
+// Platform Summary (Req 10 & 11)
 interface PlatformSummaryMetrics {
   monthlyGrossVolume: string;   // USD, 2dp — gross volume processed month-to-date
   monthlyTakeRate: string | null; // percentage or null for "N/A"
-  openDisputes: number;
   monthlyDisputeRate: string;    // percentage "0.15"
   monthlyPaymentCount: number;
+
+  // Platform account balances (Req 11) — all monetary figures pre-formatted 2dp
+  stripeBalanceUsd: string | null;  // platform Stripe available balance, USD
+  stripeBalanceError: string | null; // non-fatal; set when the Stripe balance read/convert failed
+  mercuryBalanceUsd: string | null; // Mercury bank available balance, USD
+  mercuryBalanceError: string | null; // non-fatal; set when the Mercury read failed
+  totalBalanceUsd: string | null;   // USD sum of available balances; null when none available
+  totalBalanceGbp: string | null;   // USD total converted to GBP; null when unavailable
+
   lastRefreshed: string;
 }
 ```
@@ -562,9 +599,21 @@ interface CacheEntry<T> {
 
 ### Property 25: Dispute rate calculation
 
-*For any* non-negative dispute count and non-negative payment count, the dispute rate SHALL equal (disputes / payments × 100) rounded to 2 decimal places when payments > 0, and SHALL return "0.00%" when payments equals zero.
+*For any* non-negative dispute count and non-negative payment count, the dispute rate SHALL equal (disputes / payments × 100) rounded to 2 decimal places (as a bare numeric string, without a trailing `%` — the UI appends the symbol, as it does for the take rate) when payments > 0, and SHALL return "0.00" when payments equals zero.
 
 **Validates: Requirements 10.3**
+
+### Property 26: Currency conversion
+
+*For any* non-negative amount and any pair of currencies, the conversion SHALL return the amount unchanged (rounded to 2 decimal places) when the source and target currencies are equal, SHALL return (amount × rate) rounded to 2 decimal places when a rate is available, and SHALL return null when no rate is available.
+
+**Validates: Requirements 11.3, 11.5, 11.10**
+
+### Property 27: Total platform balance summation
+
+*For any* combination of an available/unavailable Stripe USD balance and an available/unavailable Mercury USD balance, the total balance SHALL equal the sum of exactly the available USD amounts (rounded to 2 decimal places), and SHALL be null when neither balance is available.
+
+**Validates: Requirements 11.4, 11.9**
 
 ---
 
@@ -666,6 +715,8 @@ Property-based tests validate universal correctness across generated inputs. Eac
 - No PII leakage (Property 23)
 - Take rate calculation (Property 24)
 - Dispute rate calculation (Property 25)
+- Currency conversion (Property 26)
+- Total platform balance summation (Property 27)
 
 ### Integration Tests
 

@@ -46,12 +46,17 @@ describe('calculateTakeRate', () => {
 });
 
 describe('calculateDisputeRate', () => {
-    it('returns (disputes / payments) * 100 rounded to 2dp with a trailing %', () => {
-        expect(calculateDisputeRate(15, 10000)).toBe('0.15%');
-        expect(calculateDisputeRate(1, 4)).toBe('25.00%');
+    it('returns (disputes / payments) * 100 rounded to 2dp without % (UI adds it)', () => {
+        expect(calculateDisputeRate(15, 10000)).toBe('0.15');
+        expect(calculateDisputeRate(1, 4)).toBe('25.00');
     });
 
-    it('returns "0.00%" when payments is 0', () => {
-        expect(calculateDisputeRate(5, 0)).toBe('0.00%');
+    it('always matches the 2dp pattern when payments > 0', () => {
+        expect(calculateDisputeRate(3, 200)).toMatch(TWO_DP_PATTERN);
+        expect(calculateDisputeRate(0, 200)).toMatch(TWO_DP_PATTERN);
+    });
+
+    it('returns "0.00" when payments is 0', () => {
+        expect(calculateDisputeRate(5, 0)).toBe('0.00');
     });
 });

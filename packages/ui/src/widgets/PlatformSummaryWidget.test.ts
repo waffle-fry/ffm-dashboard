@@ -5,7 +5,9 @@ import {
     formatTakeRate,
     formatDisputeRate,
     buildSummaryStats,
+    buildBalanceStats,
     TAKE_RATE_UNAVAILABLE,
+    BALANCE_UNAVAILABLE,
 } from './PlatformSummaryWidget';
 
 describe('formatGrossVolume (Req 10.1)', () => {
@@ -46,21 +48,30 @@ describe('buildSummaryStats (Req 10.1–10.4)', () => {
     const base: PlatformSummaryMetrics = {
         monthlyGrossVolume: '1234.56',
         monthlyTakeRate: '12.34',
-        openDisputes: 3,
         monthlyDisputeRate: '0.15',
         monthlyPaymentCount: 42,
+        stripeBalanceUsd: '761.44',
+        stripeBalanceError: null,
+        mercuryBalanceUsd: '12000.00',
+        mercuryBalanceError: null,
+        totalBalanceUsd: '12761.44',
+        totalBalanceGbp: '9554.00',
         lastRefreshed: '2024-01-01T00:00:00.000Z',
     };
 
-    it('produces the five figures in a stable order with correct affixes', () => {
+    it('produces the four month-to-date figures in a stable order with correct affixes', () => {
         const stats = buildSummaryStats(base);
         expect(stats).toEqual([
             { label: 'Gross Volume (This Month)', value: '$1234.56' },
             { label: 'Take Rate (This Month)', value: '12.34%' },
-            { label: 'Open Disputes', value: '3' },
             { label: 'Dispute Rate (This Month)', value: '0.15%' },
             { label: 'Payments (This Month)', value: '42' },
         ]);
+    });
+
+    it('does not include an open-disputes tile (relocated to Dispute Deadlines)', () => {
+        const stats = buildSummaryStats(base);
+        expect(stats.some((stat) => stat.label === 'Open Disputes')).toBe(false);
     });
 
     it('renders "N/A" for a null take rate (gross volume zero)', () => {
@@ -74,18 +85,78 @@ describe('buildSummaryStats (Req 10.1–10.4)', () => {
     it('renders zero counts and a "0.00%" dispute rate verbatim', () => {
         const stats = buildSummaryStats({
             ...base,
-            openDisputes: 0,
             monthlyDisputeRate: '0.00',
             monthlyPaymentCount: 0,
         });
-        expect(stats[2]).toEqual({ label: 'Open Disputes', value: '0' });
-        expect(stats[3]).toEqual({
+        expect(stats[2]).toEqual({
             label: 'Dispute Rate (This Month)',
             value: '0.00%',
         });
-        expect(stats[4]).toEqual({
+        expect(stats[3]).toEqual({
             label: 'Payments (This Month)',
             value: '0',
         });
+    });
+});
+
+describe('buildBalanceStats (Req 11.5–11.9)', () => {
+    const base: PlatformSummaryMetrics = {
+        monthlyGrossVolume: '1234.56',
+        monthlyTakeRate: '12.34',
+        monthlyDisputeRate: '0.15',
+        monthlyPaymentCount: 42,
+        stripeBalanceUsd: '761.44',
+        stripeBalanceError: null,
+        mercuryBalanceUsd: '12000.00',
+        mercuryBalanceError: null,
+        totalBalanceUsd: '12761.44',
+        totalBalanceGbp: '9554.00',
+        lastRefreshed: '2024-01-01T00:00:00.000Z',
+    };
+
+    it('produces four tiles: Stripe (USD), Mercury (USD), total USD, total GBP', () => {
+        const stats = buildBalanceStats(base);
+        expect(stats).toEqual([
+            { label: 'Stripe Balance (USD)', value: '$761.44', error: null },
+            { label: 'Mercury Balance (USD)', value: '$12000.00', error: null },
+            { label: 'Total Balance (USD)', value: '$12761.44', error: null },
+            { label: 'Total Balance (GBP)', value: '£9554.00', error: null },
+        ]);
+    });
+
+    it('surfaces the Stripe balance error and marks the tile unavailable', () => {
+        const stats = buildBalanceStats({
+            ...base,
+            stripeBalanceUsd: null,
+            stripeBalanceError: 'no balance_read permission',
+        });
+        expect(stats[0]).toEqual({
+            label: 'Stripe Balance (USD)',
+            value: BALANCE_UNAVAILABLE,
+            error: 'no balance_read permission',
+        });
+    });
+
+    it('surfaces the Mercury balance error and marks the tile unavailable', () => {
+        const stats = buildBalanceStats({
+            ...base,
+            mercuryBalanceUsd: null,
+            mercuryBalanceError: 'MERCURY_API_TOKEN missing',
+        });
+        expect(stats[1]).toEqual({
+            label: 'Mercury Balance (USD)',
+            value: BALANCE_UNAVAILABLE,
+            error: 'MERCURY_API_TOKEN missing',
+        });
+    });
+
+    it('shows both totals as unavailable when they are null', () => {
+        const stats = buildBalanceStats({
+            ...base,
+            totalBalanceUsd: null,
+            totalBalanceGbp: null,
+        });
+        expect(stats[2].value).toBe(BALANCE_UNAVAILABLE);
+        expect(stats[3].value).toBe(BALANCE_UNAVAILABLE);
     });
 });

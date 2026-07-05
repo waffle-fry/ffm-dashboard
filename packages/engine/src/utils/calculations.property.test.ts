@@ -143,10 +143,11 @@ describe('calculateTakeRate (Feature: ops-dashboard, Property 24)', () => {
 // Validates Requirements 10.3.
 //
 // For any non-negative disputes and payments: calculateDisputeRate returns
-// (disputes / payments) * 100 rounded to 2dp with a trailing '%' when
-// payments > 0, and exactly "0.00%" when payments === 0.
+// (disputes / payments) * 100 rounded to 2dp (numeric portion, no trailing %,
+// like the take rate — the UI adds the "%") when payments > 0, and exactly
+// "0.00" when payments === 0.
 describe('calculateDisputeRate (Feature: ops-dashboard, Property 25)', () => {
-    it('returns (disputes / payments) * 100 rounded to 2dp with a trailing % when payments > 0', () => {
+    it('returns (disputes / payments) * 100 rounded to 2dp (no trailing %) when payments > 0', () => {
         fc.assert(
             fc.property(
                 nonNegativeCountArb,
@@ -154,15 +155,12 @@ describe('calculateDisputeRate (Feature: ops-dashboard, Property 25)', () => {
                 (disputes, payments) => {
                     const result = calculateDisputeRate(disputes, payments);
 
-                    // Contract: percentage string ending in '%'.
-                    expect(result.endsWith('%')).toBe(true);
-
-                    const numericPortion = result.slice(0, -1);
-                    expect(numericPortion).toMatch(TWO_DP_PATTERN);
+                    // Contract: bare 2dp numeric string (no '%'); the UI adds it.
+                    expect(result).toMatch(TWO_DP_PATTERN);
 
                     const expected = (disputes / payments) * 100;
                     expect(
-                        Math.abs(parseFloat(numericPortion) - expected),
+                        Math.abs(parseFloat(result) - expected),
                     ).toBeLessThanOrEqual(roundingTolerance(expected));
                 },
             ),
@@ -170,10 +168,10 @@ describe('calculateDisputeRate (Feature: ops-dashboard, Property 25)', () => {
         );
     });
 
-    it('returns "0.00%" when payments === 0', () => {
+    it('returns "0.00" when payments === 0', () => {
         fc.assert(
             fc.property(nonNegativeCountArb, (disputes) => {
-                expect(calculateDisputeRate(disputes, 0)).toBe('0.00%');
+                expect(calculateDisputeRate(disputes, 0)).toBe('0.00');
             }),
             { numRuns: 100 },
         );

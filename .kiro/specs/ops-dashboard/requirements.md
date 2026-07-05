@@ -2,7 +2,7 @@
 
 ## Introduction
 
-FansFund is an anonymous payment platform connecting Creators and their fans. The ops-dashboard is an operational dashboard for the small FansFund team, designed to run on a 25" monitor connected to a Mac Mini in a local Kubernetes cluster. The dashboard consolidates key business metrics from MongoDB, Grafana, Stripe, and AWS S3 into a single, visually branded interface. It provides real-time visibility into revenue, user growth, system health, and dispute management so the team can operate proactively.
+FansFund is an anonymous payment platform connecting Creators and their fans. The ops-dashboard is an operational dashboard for the small FansFund team, designed to run on a 25" monitor connected to a Mac Mini in a local Kubernetes cluster. The dashboard consolidates key business metrics from MongoDB, Grafana, Stripe, AWS S3, and Mercury (the platform's business bank) into a single, visually branded interface. It provides real-time visibility into revenue, user growth, system health, dispute management, and the platform's own cash balances so the team can operate proactively.
 
 ## Glossary
 
@@ -18,6 +18,8 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 - **System_Health**: The operational status of FansFund services as reported by Grafana
 - **Dashboard_Engine**: The server-side component that aggregates data from MongoDB, Stripe, Grafana, and AWS S3
 - **Dashboard_UI**: The client-side component that renders widgets and handles user interaction
+- **Mercury**: The platform's business banking provider, whose account balance is retrieved via the Mercury API
+- **Platform_Balance**: The platform's own cash holdings — its Stripe available balance plus its Mercury bank balance, expressed in USD
 
 ## Requirements
 
@@ -95,6 +97,7 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 6. IF no open disputes exist, THEN THE Dashboard_UI SHALL display "No open disputes" in the countdown area.
 7. IF a dispute deadline has already passed (days remaining is negative), THEN THE Dashboard_UI SHALL display "OVERDUE" in red with the number of days past the deadline.
 8. IF the Stripe API is unreachable, THEN THE Dashboard_UI SHALL display the last known dispute data with a stale-data indicator showing the time since the last successful refresh.
+9. THE Dashboard_UI SHALL display the total number of open disputes on the Dispute Deadlines widget alongside the deadline list.
 
 ### Requirement 7: Dispute Process Progress Tracking
 
@@ -142,5 +145,22 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 
 1. THE Dashboard_Engine SHALL calculate and display the gross volume processed through the platform from Stripe for the current month (1st 00:00 UTC to now), displayed in GBP with two decimal places.
 2. THE Dashboard_Engine SHALL calculate and display the platform's take rate (platform fees divided by gross volume, expressed as a percentage rounded to two decimal places) for the current month, displaying "N/A" when gross volume is zero.
-3. THE Dashboard_Engine SHALL display the total number of open disputes and the dispute rate (number of disputes divided by total payments, expressed as a percentage rounded to two decimal places) for the current month, displaying "0.00%" when no payments exist.
+3. THE Dashboard_Engine SHALL display the dispute rate (number of disputes divided by total payments, expressed as a percentage rounded to two decimal places) for the current month, displaying "0.00%" when no payments exist.
 4. THE Dashboard_Engine SHALL display the total number of payments processed in the current month (1st 00:00 UTC to now).
+
+### Requirement 11: Platform Account Balances
+
+**User Story:** As an ops team member, I want to see the platform's own cash balances — its Stripe balance, its Mercury bank balance, and the combined total — on the Platform Summary widget, so that I can understand how much money the platform is holding across its accounts at a glance.
+
+#### Acceptance Criteria
+
+1. THE Dashboard_Engine SHALL retrieve the platform's own Stripe account balance via the Stripe Balance API (the platform account itself, not any connected account), sum the available balance across all currency entries, convert it to USD, and present the result in USD with two decimal places.
+2. THE Dashboard_Engine SHALL retrieve the platform's Mercury bank account balance via the Mercury API and present the total available balance across the platform's Mercury accounts in USD with two decimal places.
+3. THE Dashboard_Engine SHALL convert any non-USD amount to USD using the exchange rates stored in the `ExchangeRates` collection of the `Payments` MongoDB database, and SHALL treat a USD amount as its own USD-equivalent without conversion.
+4. THE Dashboard_Engine SHALL calculate the total platform balance as the sum, in USD, of the USD Stripe available balance and the USD Mercury available balance, and SHALL display it in USD with two decimal places.
+5. THE Dashboard_Engine SHALL also present the total platform balance converted to GBP using the `ExchangeRates` collection, displayed in GBP with two decimal places.
+6. THE Dashboard_UI SHALL display four distinct stat tiles on the Platform Summary widget — Stripe balance (USD), Mercury balance (USD), total balance (USD), and total balance (GBP) — with each USD figure prefixed by the business currency symbol and the GBP total prefixed by the pound symbol.
+7. IF the platform Stripe balance cannot be retrieved (for example, the API key lacks the `balance` read permission), THEN THE Dashboard_UI SHALL display a non-fatal error indicator on the Stripe balance tile while continuing to display the Mercury balance and the remaining summary metrics.
+8. IF the Mercury balance cannot be retrieved (for example, the Mercury API token is missing or the request fails), THEN THE Dashboard_UI SHALL display a non-fatal error indicator on the Mercury balance tile while continuing to display the Stripe balance and the remaining summary metrics.
+9. IF only one of the two account balances is available, THEN THE Dashboard_Engine SHALL calculate the total balance from the available source alone, and IF neither balance is available THEN THE Dashboard_UI SHALL display the total tiles as unavailable rather than as zero.
+10. IF a required exchange rate for converting an amount to USD or to GBP is unavailable, THEN THE Dashboard_Engine SHALL treat the affected figure as unavailable (excluding it from the USD total where applicable), and THE Dashboard_UI SHALL surface a non-fatal error indicator on the affected tile.

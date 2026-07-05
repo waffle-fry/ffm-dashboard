@@ -6,16 +6,17 @@
 //
 // Every result is a string with exactly two decimal places to match the rest of
 // the dashboard's value contract and avoid floating-point display artifacts.
-// Formatting is delegated to `formatMoney`/`formatPercentage` in ./formatting,
-// which round to 2dp (round half away from zero) and render large magnitudes in
-// full decimal notation rather than scientific notation.
+// Formatting is delegated to `formatMoney` in ./formatting, which rounds to 2dp
+// (round half away from zero) and renders large magnitudes in full decimal
+// notation rather than scientific notation. Percentage values are emitted bare
+// (no "%"); the UI appends the symbol.
 //
 // Division-by-zero handling differs per requirement and is deliberate:
 //   - calculateAverage   -> null      when count is 0   (UI renders "N/A")
 //   - calculateTakeRate  -> null      when volume is 0  (UI renders "N/A")
-//   - calculateDisputeRate -> "0.00%" when payments is 0 (a rate of zero)
+//   - calculateDisputeRate -> "0.00"  when payments is 0 (a rate of zero)
 
-import { formatMoney, formatPercentage } from './formatting.js';
+import { formatMoney } from './formatting.js';
 
 /**
  * Calculates the average payment amount for a period.
@@ -46,15 +47,17 @@ export function calculateTakeRate(fees: number, volume: number): string | null {
 }
 
 /**
- * Calculates the dispute rate as a percentage string.
+ * Calculates the dispute rate as a percentage.
  *
  * Returns `(disputes / payments) * 100` formatted to exactly two decimal places
- * with a trailing `%` (e.g. "0.15%") when `payments > 0`. Returns "0.00%" when
- * `payments` is 0 (Requirement 10.3).
+ * (without a trailing `%`, matching `/^\d+\.\d{2}$/`) when `payments > 0`.
+ * Returns "0.00" when `payments` is 0 (Requirement 10.3). Like
+ * {@link calculateTakeRate}, the numeric value is emitted bare and the UI adds
+ * the "%" suffix, so the symbol is applied in exactly one place.
  */
 export function calculateDisputeRate(disputes: number, payments: number): string {
     if (payments <= 0) {
-        return '0.00%';
+        return '0.00';
     }
-    return formatPercentage((disputes / payments) * 100);
+    return formatMoney((disputes / payments) * 100);
 }

@@ -58,6 +58,7 @@ OPTIONAL_VARS=(
   AWS_ROLE_EXTERNAL_ID
   REFRESH_INTERVAL_MINUTES
   SOURCE_TIMEOUT_MS
+  MERCURY_API_TOKEN
 )
 
 # --- Colours / logging -------------------------------------------------------

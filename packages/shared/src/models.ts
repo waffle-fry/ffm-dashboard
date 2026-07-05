@@ -166,12 +166,35 @@ export interface CreatorSpotlightMetrics {
     lastRefreshed: string;
 }
 
-// Platform Summary (Req 10)
+// Platform Summary (Req 10 & 11)
 export interface PlatformSummaryMetrics {
     monthlyGrossVolume: string; // GBP, 2dp — gross volume processed month-to-date
     monthlyTakeRate: string | null; // percentage or null for "N/A"
-    openDisputes: number;
     monthlyDisputeRate: string; // percentage "0.15"
     monthlyPaymentCount: number;
+
+    // Platform account balances (Req 11). Every monetary field is a
+    // pre-formatted 2dp major-unit string (or null when unavailable); the UI
+    // only adds the currency symbol.
+    /** Platform's own Stripe available balance, converted to USD. Null when unavailable. */
+    stripeBalanceUsd: string | null;
+    /**
+     * Non-fatal error when the platform Stripe balance could not be read or
+     * converted (e.g. the API key lacks `balance` read, or an FX rate is
+     * missing), or null on success. The rest of the summary still renders.
+     */
+    stripeBalanceError: string | null;
+    /** Platform's Mercury bank available balance, in USD. Null when unavailable. */
+    mercuryBalanceUsd: string | null;
+    /**
+     * Non-fatal error when the Mercury balance could not be read (e.g. the
+     * MERCURY_API_TOKEN is missing or the request failed), or null on success.
+     */
+    mercuryBalanceError: string | null;
+    /** USD sum of the available account balances, or null when none are available. */
+    totalBalanceUsd: string | null;
+    /** The USD total converted to GBP, or null when unavailable (e.g. no FX rate). */
+    totalBalanceGbp: string | null;
+
     lastRefreshed: string;
 }

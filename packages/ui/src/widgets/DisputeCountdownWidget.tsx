@@ -21,6 +21,7 @@ import {
     describeCountdown,
     describeDisputeDays,
     formatDisputeAmount,
+    formatOpenDisputesCount,
 } from './dispute-countdown';
 
 /** Minimum prominent countdown font size (Requirement 6.2): 40px >= 32px. */
@@ -72,33 +73,39 @@ export default function DisputeCountdownWidget(): JSX.Element {
                 {/* Open disputes list, soonest-first (Req 6.3). Hidden when the
                     empty-state countdown already communicates "no disputes". */}
                 {disputes.length > 0 && (
-                    <ul className="flex flex-col divide-y divide-border border-t border-border">
-                        {disputes.map((dispute) => {
-                            const days = describeDisputeDays(
-                                dispute.daysRemaining,
-                            );
-                            return (
-                                <li
-                                    key={dispute.paymentId}
-                                    className="flex items-center justify-between gap-3 py-2 text-sm"
-                                >
-                                    <span className="min-w-0 flex-1 truncate font-mono text-text-secondary">
-                                        {dispute.paymentId}
-                                    </span>
-                                    <span className="shrink-0 tabular-nums text-text-primary">
-                                        {formatDisputeAmount(
-                                            dispute.amountUsd,
-                                        )}
-                                    </span>
-                                    <span
-                                        className={`shrink-0 tabular-nums text-right ${days.colorClass}`}
+                    <div className="flex flex-col gap-1">
+                        {/* Total open dispute count (Req 6.9). */}
+                        <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                            {formatOpenDisputesCount(disputes.length)}
+                        </p>
+                        <ul className="flex flex-col divide-y divide-border border-t border-border">
+                            {disputes.map((dispute) => {
+                                const days = describeDisputeDays(
+                                    dispute.daysRemaining,
+                                );
+                                return (
+                                    <li
+                                        key={dispute.paymentId}
+                                        className="flex items-center justify-between gap-3 py-2 text-sm"
                                     >
-                                        {days.label}
-                                    </span>
-                                </li>
-                            );
-                        })}
-                    </ul>
+                                        <span className="min-w-0 flex-1 truncate font-mono text-text-secondary">
+                                            {dispute.paymentId}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums text-text-primary">
+                                            {formatDisputeAmount(
+                                                dispute.amountUsd,
+                                            )}
+                                        </span>
+                                        <span
+                                            className={`shrink-0 tabular-nums text-right ${days.colorClass}`}
+                                        >
+                                            {days.label}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
                 )}
             </div>
         </Widget>

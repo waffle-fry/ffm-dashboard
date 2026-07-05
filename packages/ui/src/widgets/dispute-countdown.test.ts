@@ -4,6 +4,7 @@ import {
     describeCountdown,
     describeDisputeDays,
     formatDisputeAmount,
+    formatOpenDisputesCount,
     URGENCY_COLOR_CLASS,
 } from './dispute-countdown';
 
@@ -121,5 +122,17 @@ describe('formatDisputeAmount', () => {
     it('prefixes the already-2dp USD amount with $ (Req 6.3)', () => {
         expect(formatDisputeAmount('45.00')).toBe('$45.00');
         expect(formatDisputeAmount('1234.56')).toBe('$1234.56');
+    });
+});
+
+describe('formatOpenDisputesCount (Req 6.9)', () => {
+    it('uses the singular form for exactly one open dispute', () => {
+        expect(formatOpenDisputesCount(1)).toBe('1 open dispute');
+    });
+
+    it('uses the plural form for zero or many open disputes', () => {
+        expect(formatOpenDisputesCount(0)).toBe('0 open disputes');
+        expect(formatOpenDisputesCount(3)).toBe('3 open disputes');
+        expect(formatOpenDisputesCount(20)).toBe('20 open disputes');
     });
 });

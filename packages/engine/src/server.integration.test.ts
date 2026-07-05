@@ -121,9 +121,14 @@ function summaryPayload(): PlatformSummaryMetrics {
     return {
         monthlyGrossVolume: '987654.32',
         monthlyTakeRate: '12.50',
-        openDisputes: 1,
         monthlyDisputeRate: '0.15',
         monthlyPaymentCount: 320,
+        stripeBalanceUsd: '761.44',
+        stripeBalanceError: null,
+        mercuryBalanceUsd: '12000.00',
+        mercuryBalanceError: null,
+        totalBalanceUsd: '12761.44',
+        totalBalanceGbp: '9554.00',
         lastRefreshed: ISO,
     };
 }
