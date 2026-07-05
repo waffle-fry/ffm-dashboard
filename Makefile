@@ -33,6 +33,7 @@ IMAGE_TAG    ?= latest
 ENGINE_IMAGE ?= fansfund-ops/dashboard-engine
 UI_IMAGE     ?= fansfund-ops/dashboard-ui
 LOCAL_PORT   ?= 8080
+KIND_CLUSTER ?= kind
 
 ENGINE_REF := $(ENGINE_IMAGE):$(IMAGE_TAG)
 UI_REF     := $(UI_IMAGE):$(IMAGE_TAG)
@@ -48,7 +49,8 @@ SCRIPTS := ./scripts
         namespace secret apply-engine apply-ui \
         deploy deploy-engine deploy-ui rollout \
         status urls logs-engine logs-ui restart-engine restart-ui \
-        port-forward undeploy clean
+        port-forward undeploy clean \
+        cluster-up kiosk-install kiosk-uninstall kiosk-doctor
 
 # ----------------------------------------------------------------------------
 help: ## Show this help
@@ -161,6 +163,27 @@ restart-ui: ## Restart the UI deployment
 port-forward: ## Forward the UI service to http://localhost:$(LOCAL_PORT)
 	@echo "==> Forwarding svc/dashboard-ui -> http://localhost:$(LOCAL_PORT) (Ctrl-C to stop)"
 	@kubectl port-forward -n $(NAMESPACE) svc/dashboard-ui $(LOCAL_PORT):80
+
+# --- Kiosk (Mac Mini boot-to-dashboard) --------------------------------------
+cluster-up: ## Create the kind cluster with the fixed UI port mapping (no-op if it exists)
+	@if ! command -v kind >/dev/null 2>&1; then \
+	  echo "kind is required: https://kind.sigs.k8s.io/docs/user/quick-start/"; exit 1; \
+	fi; \
+	if kind get clusters 2>/dev/null | grep -qx "$(KIND_CLUSTER)"; then \
+	  echo "kind cluster '$(KIND_CLUSTER)' already exists"; \
+	else \
+	  echo "==> Creating kind cluster '$(KIND_CLUSTER)' from k8s/kind-cluster.yaml"; \
+	  kind create cluster --name "$(KIND_CLUSTER)" --config k8s/kind-cluster.yaml; \
+	fi
+
+kiosk-install: ## Install the kiosk LaunchAgents (boot-to-dashboard + 5-min auto-update)
+	@$(SCRIPTS)/kiosk/install-kiosk.sh
+
+kiosk-uninstall: ## Remove the kiosk LaunchAgents
+	@$(SCRIPTS)/kiosk/install-kiosk.sh --uninstall
+
+kiosk-doctor: ## Check the device is set up for kiosk mode (read-only diagnostics)
+	@$(SCRIPTS)/kiosk/doctor.sh
 
 undeploy: ## Delete workloads + Secret (keeps the namespace)
 	@echo "==> Removing dashboard resources from '$(NAMESPACE)'"

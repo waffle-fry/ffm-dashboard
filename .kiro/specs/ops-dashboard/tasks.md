@@ -445,6 +445,19 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
   - [x] 20.3 Verify live
     - Build, `npm test`, deploy engine, confirm `/api/metrics/health` returns data and the widget no longer shows a false "stale" badge.
 
+- [x] 21. Kiosk deployment and auto-update (Requirement 12)
+  - [x] 21.1 Fixed-URL kind cluster
+  - [x] 21.2 Boot bootstrap script
+  - [x] 21.3 Kiosk display launcher
+  - [x] 21.4 Auto-update script
+  - [x] 21.5 LaunchAgents + install/uninstall
+  - [x] 21.6 KIOSK.md runbook
+  - [x] 21.7 Verify what is verifiable in dev
+    - Done: `bash -n` + kind YAML validity + plist `plutil -lint` + `auto-update.sh --check` + `make cluster-up` no-op + `npm run build`/`npm test`. On-device boot/auto-login/kiosk flow remains a manual step for the operator (see KIOSK.md).
+  - [x] 21.8 On-device diagnostics command
+    - `scripts/kiosk/doctor.sh` + `make kiosk-doctor`: read-only checks (tooling, Docker, cluster + loopback port mapping, workloads, URL/API, required env, loaded LaunchAgents, display sleep) with PASS/WARN/FAIL and a non-zero exit on hard failures. Run and confirmed on the dev machine.
+    - _Requirements: 12.1, 12.2, 12.3, 12.4_
+
 
 
 ## Notes

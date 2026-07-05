@@ -1,0 +1,27 @@
+# kind cluster config for the ops-dashboard kiosk (Requirement 12.1).
+#
+# Creates a single-node kind cluster that maps a fixed loopback host port to the
+# Dashboard UI's NodePort, so the dashboard is always reachable at
+# http://localhost:8080 with no `kubectl port-forward` process to babysit.
+#
+#   hostPort 8080 (127.0.0.1 only) -> node containerPort 30080 (UI NodePort)
+#
+# Binding to 127.0.0.1 keeps the UI loopback-only; the engine stays a ClusterIP
+# service and is never exposed (it is unauthenticated by design).
+#
+# Create with:  make cluster-up   (a no-op when the cluster already exists)
+#
+# NOTE: an existing kind cluster created WITHOUT this mapping must be recreated
+# to pick up the port mapping (`kind delete cluster --name kind` then
+# `make cluster-up`), which is destructive — redeploy afterwards with
+# `make deploy`. See KIOSK.md.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kind
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        listenAddress: "127.0.0.1"
+        protocol: TCP

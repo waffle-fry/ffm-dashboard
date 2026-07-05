@@ -95,6 +95,34 @@ graph LR
 
 The UI pod serves the static React build via Nginx and proxies `/api/*` requests to the Engine service. The Engine pod handles all external integrations and caching.
 
+### Kiosk Deployment and Auto-Update (Requirement 12)
+
+For the dedicated Mac Mini, the dashboard runs as an unattended kiosk that boots into the UI and keeps itself current. This is host tooling around the existing containers, not a change to the app runtime.
+
+```mermaid
+graph TB
+    subgraph "Mac Mini (login session)"
+        Boot[launchd: boot bootstrap] -->|ensure| Cluster[kind cluster + make deploy]
+        KioskAgent[launchd: kiosk agent<br/>RunAtLoad + KeepAlive] -->|wait for URL, then| Chrome[Chrome --kiosk --app=http://localhost:8080]
+        Caffeinate[caffeinate: no display sleep]
+        UpdateAgent[launchd: auto-update agent<br/>StartInterval 300s] -->|fetch/pull/verify| Deploy[make deploy]
+        Deploy -->|reload tab| Chrome
+    end
+    Git[(git remote: main)] -->|new commits| UpdateAgent
+```
+
+**Fixed host URL.** The kind cluster is created from `k8s/kind-cluster.yaml` with an `extraPortMappings` entry mapping loopback host port `8080` to the UI Service's NodePort (`30080`), so the dashboard is always reachable at `http://localhost:8080` with no port-forward process. `listenAddress: "127.0.0.1"` keeps it loopback-only (the engine remains ClusterIP-only, unauthenticated by design).
+
+**Boot bootstrap** (`scripts/kiosk/bootstrap.sh`): waits for the Docker daemon, ensures the kind cluster exists (`make cluster-up`, which is a no-op when present), and runs `make deploy` when the workloads are not already available. Kubernetes then keeps the single-replica engine/UI running across restarts.
+
+**Kiosk display** (`scripts/kiosk/start-kiosk.sh`, run by a `RunAtLoad`+`KeepAlive` LaunchAgent): polls `http://localhost:8080` until it returns success, then launches Chrome with `--kiosk --app=<url>` using a dedicated `--user-data-dir` (so no session-restore or update prompts), and holds a `caffeinate -dimsu` handle to prevent display/system sleep. `KeepAlive` relaunches it if it exits.
+
+**Auto-update** (`scripts/kiosk/auto-update.sh`, run by a `StartInterval=300` LaunchAgent): guarded by a `flock` lock (no concurrent runs). It `git fetch`es `origin/main` and decides to deploy only when the remote is strictly ahead AND the local `HEAD` is an ancestor of it (a true fast-forward, via `git merge-base --is-ancestor`). It then `git pull --ff-only`, `npm ci` (when the lockfile changed), `npm run build`, `npm test`, and on success `make deploy` followed by an AppleScript Chrome tab reload. On any failure it logs and leaves the running version untouched; it never touches gitignored files (`.env`). A `--check` mode prints the deploy decision and exits without side effects, so the logic can be dry-run in dev.
+
+**Install** (`make kiosk-install` → `scripts/kiosk/install-kiosk.sh`): renders and loads the two LaunchAgent plists into `~/Library/LaunchAgents` and prints the remaining one-time manual macOS steps (enable auto-login, set Docker Desktop to start at login, disable display sleep, grant Automation permission so the updater can reload Chrome). `make kiosk-uninstall` unloads them.
+
+**Verification boundary.** The scripts, kind config, plists, and Makefile targets are validated in dev (syntax checks, YAML validity, and the auto-update `--check` dry-run). On the device, `make kiosk-doctor` runs read-only checks (tooling, Docker, cluster, the loopback port mapping, workloads, URL/API reachability, required env, loaded LaunchAgents, display-sleep) and flags the GUI-only settings it cannot inspect; the end-to-end kiosk behaviour (boot, auto-login, launchd, Chrome kiosk) must still be validated on the device itself.
+
 ---
 
 ## Components and Interfaces

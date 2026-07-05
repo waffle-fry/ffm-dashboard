@@ -20,6 +20,8 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 - **Dashboard_UI**: The client-side component that renders widgets and handles user interaction
 - **Mercury**: The platform's business banking provider, whose account balance is retrieved via the Mercury API
 - **Platform_Balance**: The platform's own cash holdings — its Stripe available balance plus its Mercury bank balance, expressed in USD
+- **Kiosk**: The dedicated Mac Mini running the dashboard fullscreen as the only visible application, booting into it and auto-updating from git
+- **Auto_Update**: The scheduled process on the Kiosk that pulls new commits from the tracked branch, verifies them, and redeploys
 
 ## Requirements
 
@@ -164,3 +166,20 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 8. IF the Mercury balance cannot be retrieved (for example, the Mercury API token is missing or the request fails), THEN THE Dashboard_UI SHALL display a non-fatal error indicator on the Mercury balance tile while continuing to display the Stripe balance and the remaining summary metrics.
 9. IF only one of the two account balances is available, THEN THE Dashboard_Engine SHALL calculate the total balance from the available source alone, and IF neither balance is available THEN THE Dashboard_UI SHALL display the total tiles as unavailable rather than as zero.
 10. IF a required exchange rate for converting an amount to USD or to GBP is unavailable, THEN THE Dashboard_Engine SHALL treat the affected figure as unavailable (excluding it from the USD total where applicable), and THE Dashboard_UI SHALL surface a non-fatal error indicator on the affected tile.
+
+### Requirement 12: Kiosk Deployment and Auto-Update
+
+**User Story:** As an ops team member, I want the dedicated Mac Mini to boot straight into the fullscreen dashboard and keep itself on the latest committed version automatically, so that the dashboard is always on, current, and requires no manual operation.
+
+#### Acceptance Criteria
+
+1. THE system SHALL provide a reproducible way to create the local Kubernetes cluster such that the Dashboard UI is reachable at a fixed host URL (http://localhost:8080) bound to loopback, without a manually started port-forward.
+2. WHEN the device boots and the container runtime becomes available, THE system SHALL ensure the cluster exists and that the engine and UI are deployed, deploying them if they are not already running.
+3. WHEN the dashboard URL responds successfully, THE system SHALL launch the browser in fullscreen kiosk mode showing only the dashboard, and SHALL relaunch it if it exits.
+4. WHILE the kiosk is running, THE system SHALL prevent the display and system from sleeping.
+5. THE system SHALL check the tracked git branch (`main`) for new commits at a configurable interval with a default of 5 minutes.
+6. IF new commits exist on the tracked branch AND they can be fast-forward merged, THEN THE system SHALL pull them, rebuild, run the test suite, and redeploy only if the build and tests both succeed.
+7. IF the pull is not a fast-forward, or the build or tests fail, THEN THE system SHALL NOT redeploy, SHALL retain the currently running version, and SHALL log the reason.
+8. WHEN a redeploy of the UI completes successfully, THE system SHALL reload the kiosk browser so the latest UI is displayed.
+9. THE auto-update process SHALL NOT run concurrently with another instance of itself; a check that starts while one is already in progress SHALL be skipped.
+10. THE auto-update process SHALL NOT modify local untracked or gitignored configuration (in particular the `.env` secrets file).
