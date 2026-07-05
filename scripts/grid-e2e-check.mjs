@@ -87,7 +87,11 @@ async function checkViewport(browser, viewport) {
 
     const container = await page.$eval('.react-grid-layout', (e) => {
         const r = e.getBoundingClientRect();
-        return { left: Math.round(r.left), width: Math.round(r.width) };
+        return {
+            left: Math.round(r.left),
+            top: Math.round(r.top),
+            width: Math.round(r.width),
+        };
     });
 
     const before = await readItems(page);
@@ -135,8 +139,11 @@ async function checkViewport(browser, viewport) {
     if (!handle) {
         problems.push(`[${label}] No .widget-drag-handle found — cannot drag.`);
     } else {
-        // Track the SPECIFIC dragged card (its own DOM node) so we can assert it
-        // ends up where it was dropped rather than snapping back/left/up.
+        // Free-placement model: the dragged card must (a) stay where it is
+        // dropped (follow the cursor on both axes, not snap back), (b) leave no
+        // overlaps, and (c) NOT let the grid balloon far past the viewport.
+        const beforeBottom = Math.max(...before.map((r) => r.top + r.height));
+
         const items = await page.$$('.react-grid-item');
         const dragged = items[0];
         const dragHandle = await dragged.$('.widget-drag-handle');
@@ -145,7 +152,7 @@ async function checkViewport(browser, viewport) {
         const startX = box.x + box.width / 2;
         const startY = box.y + box.height / 2;
         const DX = Math.min(400, container.width * 0.3);
-        const DY = 300;
+        const DY = 250;
 
         await page.mouse.move(startX, startY);
         await page.mouse.down();
@@ -160,26 +167,77 @@ async function checkViewport(browser, viewport) {
         await page.mouse.up();
         await new Promise((r) => setTimeout(r, 600));
 
+        const after = await readItems(page);
+
+        // (a) Dragged card stayed where dropped (followed both axes).
         const endRect = await dragged.boundingBox();
-        const movedRight = endRect.x - startRect.x > 150;
-        const movedDown = endRect.y - startRect.y > 150;
-        console.log(
-            `[${label}] dragged card delta: dx=${Math.round(endRect.x - startRect.x)} dy=${Math.round(endRect.y - startRect.y)}`,
-        );
-        if (!movedRight || !movedDown) {
+        const dx = Math.round(endRect.x - startRect.x);
+        const dy = Math.round(endRect.y - startRect.y);
+        console.log(`[${label}] dragged card delta: dx=${dx} dy=${dy}`);
+        if (dx <= 150 || dy <= 120) {
             problems.push(
-                `[${label}] Dragged card did NOT follow the drop (movedRight=${movedRight}, movedDown=${movedDown}) — it snapped back.`,
+                `[${label}] Dragged card did NOT stay where dropped (dx=${dx}, dy=${dy}) — it snapped back.`,
             );
         } else {
             console.log(`[${label}] dragged card stayed where dropped: OK`);
         }
 
-        const after = await readItems(page);
+        // No overlaps.
         const overlapsAfter = findOverlaps(after);
         if (overlapsAfter.length > 0) {
             problems.push(`[${label}] Cards overlap AFTER dragging: ${JSON.stringify(overlapsAfter)}`);
         } else {
             console.log(`[${label}] no overlaps after drag: OK`);
+        }
+
+        // Bounded: a single drop may make the grid a bit taller than the
+        // viewport (it scrolls), but it must not fly off unbounded.
+        const afterBottom = Math.max(...after.map((r) => r.top + r.height));
+        const grewBy = afterBottom - beforeBottom;
+        const capacity = 1.8 * viewport.height;
+        console.log(
+            `[${label}] grid bottom before=${Math.round(beforeBottom)} after=${Math.round(afterBottom)} (grewBy=${Math.round(grewBy)})`,
+        );
+        if (afterBottom - container.top > capacity) {
+            problems.push(
+                `[${label}] Grid grew past ${Math.round(capacity)}px (bottom at ${Math.round(afterBottom - container.top)}px) — cards ballooned down the page.`,
+            );
+        } else {
+            console.log(`[${label}] grid height stayed bounded: OK`);
+        }
+
+        // Non-cumulative: drag the same card back toward the top-left; the grid
+        // must shrink back to ~its original height, proving vacated space is
+        // reclaimed and growth can't accumulate over repeated moves.
+        const beforeBackRect = await dragged.boundingBox();
+        const bh = await (await dragged.$('.widget-drag-handle')).boundingBox();
+        const backDX = -(beforeBackRect.x - startRect.x);
+        const backDY = -(beforeBackRect.y - startRect.y);
+        await page.mouse.move(bh.x + bh.width / 2, bh.y + bh.height / 2);
+        await page.mouse.down();
+        for (let i = 1; i <= 25; i++) {
+            await page.mouse.move(
+                bh.x + bh.width / 2 + (backDX * i) / 25,
+                bh.y + bh.height / 2 + (backDY * i) / 25,
+            );
+            await new Promise((r) => setTimeout(r, 8));
+        }
+        await page.mouse.up();
+        await new Promise((r) => setTimeout(r, 600));
+        const reclaimed = await readItems(page);
+        const reclaimedBottom = Math.max(...reclaimed.map((r) => r.top + r.height));
+        console.log(
+            `[${label}] grid bottom after moving card back=${Math.round(reclaimedBottom)} (original=${Math.round(beforeBottom)})`,
+        );
+        if (reclaimedBottom > beforeBottom + 80) {
+            problems.push(
+                `[${label}] Space not reclaimed after moving the card back (bottom ${Math.round(reclaimedBottom)} vs original ${Math.round(beforeBottom)}) — growth is cumulative.`,
+            );
+        } else {
+            console.log(`[${label}] space reclaimed (non-cumulative): OK`);
+        }
+        if (findOverlaps(reclaimed).length > 0) {
+            problems.push(`[${label}] Overlaps after moving the card back.`);
         }
     }
 

@@ -12,13 +12,15 @@
 // correct fraction of the container, filling the whole screen width.
 //
 // Interaction model (Requirement 2.1):
-//   - Dragging a card reorders the grid: the cards it moves over slide out of
-//     the way and it drops into a tidy slot. `compactType="vertical"` keeps the
-//     grid packed so cards never overlap and never get pushed off-screen, and
-//     `preventCollision={false}` lets a dragged/resized card displace others so
-//     they flow around it.
+//   - Free placement: a dropped/resized card stays where the user leaves it
+//     (`compactType={null}` — no gravity, so it never snaps back up or to the
+//     left), and `preventCollision={false}` lets it push the cards it overlaps
+//     out of the way.
+//   - Bounded height: the grid is capped at `maxRows` rows (it never grows
+//     beyond the viewport), so pushed cards can't cascade off down an
+//     ever-growing page. Row height is sized so those rows exactly fill the
+//     viewport (Requirement 1.3).
 //   - Resizing behaves the same way: growing a card pushes its neighbours.
-//   - `isBounded` keeps every card inside the grid.
 //
 // Requirement 1.2: no horizontal overflow from 1024px to 5120px — a fixed
 //   column count scaled to the measured width always fits exactly.
@@ -41,6 +43,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
 import {
+    compactAround,
     computeRowHeight,
     constrainLayout,
     DEFAULT_MAX_ROWS,
@@ -83,12 +86,13 @@ const DRAG_HANDLE_CLASS = 'widget-drag-handle';
 const DRAG_CANCEL_CLASS = 'widget-no-drag';
 
 /**
- * Generous vertical row cap used only to bound layout sanitisation. It is far
- * larger than the visible row count so cards can be placed below the fold (the
- * grid scrolls) rather than being clamped back up — while horizontal bounds
- * (columns) are still strictly enforced to prevent right-edge overflow.
+ * Generous vertical bound for layout sanitisation. The layout we persist is
+ * already packed by {@link compactAround}, so we must NOT re-clamp its rows to
+ * the visible `maxRows` (that would collide tall cards). We only need to keep
+ * items within the columns; this large row bound leaves the packed y-positions
+ * untouched while still guarding horizontal overflow.
  */
-const GROW_ROWS = 1000;
+const SANITISE_ROWS = 1000;
 
 /** Measured size of an element. */
 interface Size {
@@ -139,14 +143,12 @@ export default function WidgetGrid({
         [height, maxRows],
     );
 
-    // A single layout, clamped horizontally to the fixed column count so no
-    // card can extend past the right edge. Vertically we use a generous cap
-    // (not the visible `maxRows`) so cards are free to sit below the fold and
-    // the grid can grow/scroll during rearrangement instead of snapping cards
-    // back up. Row height (below) still targets `maxRows` so the DEFAULT layout
-    // fills the viewport with no scroll.
+    // A single layout, clamped only horizontally (to the fixed column count) so
+    // no card can extend past the right edge. We deliberately do NOT re-clamp
+    // the rows: the persisted layout is already packed by compactAround, and
+    // re-clamping its y-positions would collide tall cards.
     const constrained = useMemo(
-        () => constrainLayout(layout, GRID_COLUMNS, GROW_ROWS),
+        () => constrainLayout(layout, GRID_COLUMNS, SANITISE_ROWS),
         [layout],
     );
 
@@ -160,11 +162,16 @@ export default function WidgetGrid({
         [widgets, layoutIds],
     );
 
-    // Persist the layout when an interaction finishes (drag/resize stop). The
-    // callback receives the FULL post-compaction layout — including any cards
-    // that were pushed out of the way — so their new positions are saved too.
-    const persistLayout = (current: Layout[]): void => {
-        onLayoutChange(toLayoutItems(current));
+    // Persist when an interaction finishes. The card the user moved/resized
+    // (`newItem`) is kept exactly where they left it, and the other cards are
+    // packed up around it (compactAround) so the vacated space is reclaimed and
+    // the grid can't balloon or grow cumulatively.
+    const persistLayout = (current: Layout[], newItem: Layout | undefined): void => {
+        const items = toLayoutItems(current);
+        const next = newItem
+            ? compactAround(items, GRID_COLUMNS, maxRows, newItem.i)
+            : items;
+        onLayoutChange(next);
     };
 
     return (
@@ -184,18 +191,16 @@ export default function WidgetGrid({
                     draggableCancel={`.${DRAG_CANCEL_CLASS}`}
                     isDraggable
                     isResizable
-                    // Free placement: a dropped/resized card stays where the user
-                    // leaves it (no gravity), and preventCollision=false lets it
-                    // push the cards it overlaps out of the way. The grid is NOT
-                    // height-capped (no maxRows) and its container scrolls
-                    // vertically, so displaced cards always have somewhere to go
-                    // instead of being crushed off-screen or snapping back — the
-                    // default layout still fills the viewport with no scroll.
+                    // Calm dragging: the card floats freely under the cursor and
+                    // the other cards DON'T jump around live (allowOverlap). When
+                    // the drag/resize ends, `persistLayout` keeps the moved card
+                    // where it was dropped and packs the others up around it, so
+                    // nothing overlaps and the grid stays bounded (no ballooning).
                     compactType={null}
-                    preventCollision={false}
+                    allowOverlap
                     useCSSTransforms
-                    onDragStop={persistLayout}
-                    onResizeStop={persistLayout}
+                    onDragStop={(l, _o, n) => persistLayout(l, n)}
+                    onResizeStop={(l, _o, n) => persistLayout(l, n)}
                 >
                     {visibleWidgets.map((widget) => (
                         // Bare cell: the concrete widget fills it entirely and

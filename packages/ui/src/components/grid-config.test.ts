@@ -4,6 +4,7 @@ import {
     BREAKPOINT_NAMES,
     buildBreakpointLayouts,
     clampLayoutItem,
+    compactAround,
     computeRowHeight,
     constrainLayout,
     DEFAULT_MAX_ROWS,
@@ -196,5 +197,76 @@ describe('constrainLayout / toLayoutItems', () => {
         });
         expect('moved' in items[0]).toBe(false);
         expect('static' in items[0]).toBe(false);
+    });
+});
+
+function overlap(a: LayoutItem, b: LayoutItem): boolean {
+    return (
+        a.x < b.x + b.w &&
+        b.x < a.x + a.w &&
+        a.y < b.y + b.h &&
+        b.y < a.y + a.h
+    );
+}
+
+describe('compactAround (bounded free placement)', () => {
+    // A 16-col grid mirroring the default top band + a tall card below.
+    const base: LayoutItem[] = [
+        { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+        { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+        { i: 'c', x: 8, y: 0, w: 4, h: 4 },
+        { i: 'd', x: 0, y: 4, w: 8, h: 4 },
+    ];
+
+    it('keeps the anchor exactly where it was dropped', () => {
+        // Drop 'a' at a lower/right position; it must stay there.
+        const dropped = base.map((it) =>
+            it.i === 'a' ? { ...it, x: 8, y: 4 } : it,
+        );
+        const result = compactAround(dropped, 16, 12, 'a');
+        const a = result.find((it) => it.i === 'a')!;
+        expect({ x: a.x, y: a.y }).toEqual({ x: 8, y: 4 });
+    });
+
+    it('produces no overlaps', () => {
+        const dropped = base.map((it) =>
+            it.i === 'd' ? { ...it, x: 2, y: 1 } : it,
+        );
+        const result = compactAround(dropped, 16, 12, 'd');
+        for (let i = 0; i < result.length; i++) {
+            for (let j = i + 1; j < result.length; j++) {
+                expect(overlap(result[i], result[j])).toBe(false);
+            }
+        }
+    });
+
+    it('packs the other cards upward, reclaiming vacated space (bounded)', () => {
+        // Move 'a' down to y=8; the others should pack up toward y=0 rather than
+        // everything cascading further down.
+        const dropped = base.map((it) =>
+            it.i === 'a' ? { ...it, x: 0, y: 8 } : it,
+        );
+        const result = compactAround(dropped, 16, 12, 'a');
+        const maxBottom = Math.max(...result.map((it) => it.y + it.h));
+        // Total content is 4 rows (top band) + the anchor at y=8..12 => <= 12.
+        expect(maxBottom).toBeLessThanOrEqual(12);
+        // A non-anchor card reclaimed the freed top space.
+        const b = result.find((it) => it.i === 'b')!;
+        expect(b.y).toBe(0);
+    });
+
+    it('clamps an anchor dropped out of bounds back into the grid', () => {
+        const dropped = base.map((it) =>
+            it.i === 'a' ? { ...it, x: 30, y: 99 } : it,
+        );
+        const result = compactAround(dropped, 16, 12, 'a');
+        const a = result.find((it) => it.i === 'a')!;
+        expect(a.x + a.w).toBeLessThanOrEqual(16);
+        expect(a.y + a.h).toBeLessThanOrEqual(12);
+    });
+
+    it('preserves item identity and count', () => {
+        const result = compactAround(base, 16, 12, 'a');
+        expect(result.map((it) => it.i).sort()).toEqual(['a', 'b', 'c', 'd']);
     });
 });

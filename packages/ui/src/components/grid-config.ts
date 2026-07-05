@@ -194,3 +194,86 @@ export function toLayoutItems(layout: Layout[]): LayoutItem[] {
         return result;
     });
 }
+
+/** True when two layout items overlap on both axes. */
+function itemsOverlap(a: LayoutItem, b: LayoutItem): boolean {
+    return (
+        a.x < b.x + b.w &&
+        b.x < a.x + a.w &&
+        a.y < b.y + b.h &&
+        b.y < a.y + a.h
+    );
+}
+
+/**
+ * Lowest (smallest) `y >= 0` at which `item` can sit without overlapping any of
+ * `placed`, keeping its `x`/`w`. Cards are packed upward, so this finds the
+ * highest resting position given the already-placed cards.
+ */
+function settleY(item: LayoutItem, placed: readonly LayoutItem[]): number {
+    let y = 0;
+    let moved = true;
+    while (moved) {
+        moved = false;
+        for (const p of placed) {
+            const xOverlap = item.x < p.x + p.w && p.x < item.x + item.w;
+            if (!xOverlap) continue;
+            // If the item at its current y would overlap p, drop it just below p.
+            if (y < p.y + p.h && p.y < y + item.h) {
+                y = p.y + p.h;
+                moved = true;
+            }
+        }
+    }
+    return y;
+}
+
+/**
+ * Re-pack a layout after a drag/resize so the grid stays bounded WITHOUT
+ * snapping the card the user just moved.
+ *
+ * The card identified by `anchorId` is treated as fixed — it keeps the position
+ * the user dropped it at (only clamped into the grid bounds) — and every OTHER
+ * card is packed upward around it. This reclaims the space the moved card
+ * vacated (so the page can't balloon or grow cumulatively) while leaving the
+ * moved card exactly where the user put it. The result is overlap-free and, as
+ * long as the content fits, stays within `maxRows`.
+ *
+ * Pure and DOM-free so it can be unit-tested directly.
+ *
+ * @param layout   The post-interaction layout (may contain overlaps).
+ * @param cols     Column count of the grid.
+ * @param maxRows  Row cap the anchor is clamped into.
+ * @param anchorId `i` of the card to keep fixed (the dragged/resized card).
+ */
+export function compactAround(
+    layout: readonly LayoutItem[],
+    cols: number,
+    maxRows: number,
+    anchorId: string,
+): LayoutItem[] {
+    const anchorSource = layout.find((item) => item.i === anchorId);
+    // No anchor (shouldn't happen) → fall back to a plain upward pack.
+    const anchor = anchorSource
+        ? clampLayoutItem(anchorSource, cols, maxRows)
+        : null;
+
+    // Others packed in reading order (top-to-bottom, then left-to-right) so the
+    // pack is stable and deterministic.
+    const others = layout
+        .filter((item) => item.i !== anchorId)
+        .map((item) => clampLayoutItem(item, cols, maxRows))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+    const placed: LayoutItem[] = [];
+    if (anchor) placed.push(anchor);
+
+    for (const item of others) {
+        const y = settleY(item, placed);
+        placed.push({ ...item, y });
+    }
+
+    // Return in the original order so React keys / persistence stay stable.
+    const byId = new Map(placed.map((item) => [item.i, item]));
+    return layout.map((item) => byId.get(item.i) ?? item);
+}
