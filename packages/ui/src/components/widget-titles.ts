@@ -18,4 +18,5 @@ export const WIDGET_TITLES: Record<WidgetType, string> = {
     'dispute-progress': 'Dispute Progress',
     'transaction-feed': 'Recent Transactions',
     'platform-summary': 'Platform Summary',
+    'creator-spotlight': 'Creator Spotlight',
 };

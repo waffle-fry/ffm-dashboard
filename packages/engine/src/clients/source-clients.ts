@@ -70,11 +70,20 @@ import type {
     GrafanaApiSamples,
 } from '../collectors/grafana-collector.js';
 import type { DisputeStatus } from '@fans-fund-me/shared';
+import type {
+    S3ClientPort,
+    S3ObjectSummary,
+} from '../collectors/s3-collector.js';
 import {
-    type S3ClientPort,
-    type S3ObjectSummary,
     DISPUTE_DOCS_BUCKET,
 } from '../collectors/s3-collector.js';
+import type {
+    SpotlightSource,
+    SpotlightProfile,
+    SpotlightCustomer,
+    SpotlightPayment,
+    SpotlightBalance,
+} from '../collectors/spotlight-collector.js';
 
 /**
  * Thrown by a source adapter when the external integration it fronts has not
@@ -537,6 +546,158 @@ export class GrafanaClient implements GrafanaClientPort {
             windowMinutes: 5,
             errorCount,
             latenciesMs,
+        };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Creator Spotlight (single-user panel)
+// ---------------------------------------------------------------------------
+
+/**
+ * Spotlight adapter. Reads a single creator's profile (Profile DB), Stripe
+ * linkage + received payments (Payments DB), and their Stripe (Connect) account
+ * balance. Uses the `mongodb` driver (its own lazily-opened connection, reused
+ * across polls) and the `stripe` SDK.
+ *
+ * Environment: MONGODB_URI (required), STRIPE_API_KEY (required for balance).
+ * The profile lives in the `Profile` database and the Stripe linkage/payments
+ * in the `Payments` database, so this adapter addresses those databases by name
+ * regardless of the default database in the connection string.
+ */
+export class SpotlightClient implements SpotlightSource {
+    private readonly uri: string | undefined;
+    private readonly apiKey: string | undefined;
+    private connection: Promise<MongoDriver> | undefined;
+    private stripe: Stripe | undefined;
+
+    constructor() {
+        this.uri = env('MONGODB_URI');
+        this.apiKey = env('STRIPE_API_KEY');
+    }
+
+    private client(): Promise<MongoDriver> {
+        if (this.uri === undefined) {
+            throw new SourceNotConfiguredError('CreatorSpotlight', 'MONGODB_URI');
+        }
+        if (this.connection === undefined) {
+            const uri = this.uri;
+            this.connection = (async () => {
+                const client = new MongoDriver(uri);
+                await client.connect();
+                return client;
+            })().catch((error) => {
+                this.connection = undefined;
+                throw error;
+            });
+        }
+        return this.connection;
+    }
+
+    private sdk(): Stripe {
+        if (this.apiKey === undefined) {
+            throw new SourceNotConfiguredError('CreatorSpotlight', 'STRIPE_API_KEY');
+        }
+        if (this.stripe === undefined) {
+            this.stripe = new Stripe(this.apiKey);
+        }
+        return this.stripe;
+    }
+
+    async getProfileByUsername(username: string): Promise<SpotlightProfile | null> {
+        const client = await this.client();
+        const doc = await client
+            .db('Profile')
+            .collection('Profile')
+            .findOne(
+                { username },
+                {
+                    projection: {
+                        username: 1,
+                        displayName: 1,
+                        country: 1,
+                        currency: 1,
+                        ffmStatus: 1,
+                        acceptingPaymentsOptIn: 1,
+                    },
+                },
+            );
+        if (doc === null) {
+            return null;
+        }
+        return {
+            profileId: String(doc._id),
+            username: typeof doc.username === 'string' ? doc.username : username,
+            displayName: typeof doc.displayName === 'string' ? doc.displayName : null,
+            country: typeof doc.country === 'string' ? doc.country : null,
+            currency: typeof doc.currency === 'string' ? doc.currency : null,
+            ffmStatus: typeof doc.ffmStatus === 'string' ? doc.ffmStatus : null,
+            acceptingPayments:
+                typeof doc.acceptingPaymentsOptIn === 'boolean'
+                    ? doc.acceptingPaymentsOptIn
+                    : null,
+        };
+    }
+
+    async getCustomer(profileId: string): Promise<SpotlightCustomer | null> {
+        const client = await this.client();
+        const doc = await client
+            .db('Payments')
+            .collection('Customer')
+            .findOne(
+                { _id: profileId as unknown as object },
+                { projection: { stripeId: 1, email: 1, country: 1 } },
+            );
+        if (doc === null) {
+            return null;
+        }
+        return {
+            stripeId: typeof doc.stripeId === 'string' ? doc.stripeId : null,
+            email: typeof doc.email === 'string' ? doc.email : null,
+            country: typeof doc.country === 'string' ? doc.country : null,
+        };
+    }
+
+    async getReceivedPayments(profileId: string): Promise<SpotlightPayment[]> {
+        const client = await this.client();
+        const docs = await client
+            .db('Payments')
+            .collection('Payments')
+            .find(
+                { recipientId: profileId },
+                { projection: { state: 1, recipientAmount: 1, recipientCurrency: 1 } },
+            )
+            .toArray();
+        return docs.map((doc) => ({
+            state: typeof doc.state === 'string' ? doc.state : 'unknown',
+            recipientAmount:
+                typeof doc.recipientAmount === 'number' ? doc.recipientAmount : 0,
+            recipientCurrency:
+                typeof doc.recipientCurrency === 'string'
+                    ? doc.recipientCurrency
+                    : 'GBP',
+        }));
+    }
+
+    async getBalance(
+        stripeAccountId: string,
+        currency: string,
+    ): Promise<SpotlightBalance> {
+        const stripe = this.sdk();
+        // Connected-account balance: the account id is a request option, not a
+        // parameter. Requires the API key to have `balance_read` on the account.
+        const balance = await stripe.balance.retrieve(
+            {},
+            { stripeAccount: stripeAccountId },
+        );
+        const wanted = currency.toLowerCase();
+        const pick = (funds: Array<{ amount: number; currency: string }>): number => {
+            const match = funds.find((f) => f.currency === wanted);
+            return (match ?? funds[0])?.amount ?? 0;
+        };
+        return {
+            available: pick(balance.available ?? []),
+            pending: pick(balance.pending ?? []),
         };
     }
 }

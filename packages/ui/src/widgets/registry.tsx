@@ -17,6 +17,7 @@ import DisputeCountdownWidget from './DisputeCountdownWidget';
 import DisputeProgressWidget from './DisputeProgressWidget';
 import TransactionFeedWidget from './TransactionFeedWidget';
 import PlatformSummaryWidget from './PlatformSummaryWidget';
+import CreatorSpotlightWidget from './CreatorSpotlightWidget';
 
 /**
  * The concrete component for every widget type. Every {@link WidgetType} has an
@@ -31,6 +32,7 @@ export const WIDGET_COMPONENTS: Record<WidgetType, ComponentType> = {
     'dispute-progress': DisputeProgressWidget,
     'transaction-feed': TransactionFeedWidget,
     'platform-summary': PlatformSummaryWidget,
+    'creator-spotlight': CreatorSpotlightWidget,
 };
 
 /**

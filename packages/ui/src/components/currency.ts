@@ -24,3 +24,35 @@ export const CURRENCY_CODE = 'USD';
 export function formatCurrency(value: string): string {
     return `${CURRENCY_SYMBOL}${value}`;
 }
+
+/** Symbols for the currencies we display; falls back to the ISO code. */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+    USD: '$',
+    GBP: '£',
+    EUR: '€',
+    JPY: '¥',
+    AUD: 'A$',
+    CAD: 'C$',
+};
+
+/** The symbol for an ISO 4217 code (e.g. "GBP" → "£"), or "" when unknown. */
+export function symbolForCurrency(code: string | null | undefined): string {
+    if (!code) return '';
+    return CURRENCY_SYMBOLS[code.toUpperCase()] ?? '';
+}
+
+/**
+ * Format an already-2dp amount string in an arbitrary currency: prefix with the
+ * symbol when known (e.g. "£12.34"), otherwise suffix the ISO code
+ * (e.g. "12.34 SEK"). Unlike {@link formatCurrency}, this respects the given
+ * currency rather than assuming the platform default — used where amounts are
+ * in a specific user's currency.
+ */
+export function formatCurrencyAmount(
+    value: string,
+    currency: string | null | undefined,
+): string {
+    const symbol = symbolForCurrency(currency);
+    if (symbol) return `${symbol}${value}`;
+    return currency ? `${value} ${currency}` : value;
+}

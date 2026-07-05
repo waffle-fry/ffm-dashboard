@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * The six widget/metric keys served by `GET /api/metrics/{widget}`. Mirrors the
+ * The widget/metric keys served by `GET /api/metrics/{widget}`. Mirrors the
  * engine's `METRIC_KEYS` (see packages/engine/src/cache/metrics-cache.ts).
  */
 export type MetricWidget =
@@ -34,7 +34,8 @@ export type MetricWidget =
     | 'health'
     | 'disputes'
     | 'transactions'
-    | 'summary';
+    | 'summary'
+    | 'spotlight';
 
 /**
  * The JSON envelope returned by every metrics endpoint, generic over the widget

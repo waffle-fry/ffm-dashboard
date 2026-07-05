@@ -61,6 +61,14 @@ export interface ServiceHealth {
 export interface DisputeMetrics {
     nearestDeadlineDays: number | null; // null = no open disputes
     disputes: DisputeItem[];
+    /**
+     * Error message when the S3 evidence lookup failed (e.g. missing S3
+     * permissions), or null when it succeeded / was not attempted. Dispute
+     * amounts and deadlines still come through from Stripe; only the evidence
+     * (upload/batch) columns are unavailable, so the UI surfaces this as a
+     * non-fatal warning on the dispute widget rather than failing the widget.
+     */
+    evidenceError: string | null;
     lastRefreshed: string;
 }
 
@@ -100,6 +108,46 @@ export interface TransactionItem {
     amount: string; // original currency, 2dp
     currency: string; // ISO 4217
     timestamp: string; // ISO 8601 with timezone
+}
+
+// Creator Spotlight (a focused panel for a single creator/user).
+export interface CreatorSpotlightMetrics {
+    /** Platform username being spotlighted. */
+    username: string;
+    /** Display name, or null when unavailable. */
+    displayName: string | null;
+    /** ISO country code (e.g. "GB"), or null. */
+    country: string | null;
+    /** The creator's ISO 4217 currency code (e.g. "GBP"); drives the symbol. */
+    currency: string;
+    /** FFM onboarding/approval status (e.g. "APPROVED"), or null. */
+    ffmStatus: string | null;
+    /** Whether the creator is currently accepting payments, or null if unknown. */
+    acceptingPayments: boolean | null;
+    /** The creator's Stripe (Connect) account id, or null when not linked. */
+    stripeAccountId: string | null;
+
+    /** Count of successful payments received by the creator. */
+    succeededPaymentCount: number;
+    /** Count of all payment attempts (any state) received by the creator. */
+    totalPaymentCount: number;
+    /** Total value of successful payments received, 2dp in the creator's currency. */
+    succeededPaymentValue: string;
+
+    /** Available Stripe balance (2dp, creator currency), or null when unavailable. */
+    balanceAvailable: string | null;
+    /** Pending Stripe balance (2dp, creator currency), or null when unavailable. */
+    balancePending: string | null;
+    /**
+     * Error message when the Stripe balance could not be read (e.g. the API key
+     * lacks `balance_read` permission), or null when it was read successfully.
+     * Payment counts/values still show; only the balance is affected.
+     */
+    balanceError: string | null;
+    /** Error message when the creator profile/customer could not be found, or null. */
+    profileError: string | null;
+
+    lastRefreshed: string;
 }
 
 // Platform Summary (Req 10)

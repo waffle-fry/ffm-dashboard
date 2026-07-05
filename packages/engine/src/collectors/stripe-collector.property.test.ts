@@ -446,3 +446,68 @@ describe('StripeCollector transaction feed (Property 22: Transaction feed orderi
         );
     });
 });
+
+// ---------------------------------------------------------------------------
+// Evidence provider error surfacing (Requirement 7): when the S3 evidence
+// lookup fails (e.g. missing permissions), the dispute amounts/deadlines still
+// come through and the failure is reported on `DisputeMetrics.evidenceError`.
+// ---------------------------------------------------------------------------
+
+describe('StripeCollector dispute evidence errors', () => {
+    function openDispute(nowSec: number): StripeDisputeRecord {
+        return {
+            id: 'dp_1',
+            amount: 4500,
+            charge: 'ch_1',
+            payment_intent: 'pi_1',
+            status: 'needs_response',
+            created: nowSec - 3600,
+            evidence_details: { due_by: nowSec + 5 * 24 * 60 * 60 },
+        };
+    }
+
+    it('surfaces evidenceError and keeps disputes when the S3 check throws', async () => {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const collector = new StripeCollector(
+            makeStripeClient({ disputes: [openDispute(nowSec)] }),
+            {
+                evidenceProvider: {
+                    checkEvidence: async () => {
+                        throw new Error(
+                            'AccessDenied: not authorized to perform s3:ListBucket',
+                        );
+                    },
+                },
+            },
+        );
+
+        const result = await collector.collect();
+        expect(result.disputes?.evidenceError).toContain('AccessDenied');
+        // Dispute itself is still reported (amount/deadline unaffected).
+        expect(result.disputes?.disputes).toHaveLength(1);
+        expect(result.disputes?.disputes[0].evidenceUploaded).toBe(false);
+    });
+
+    it('leaves evidenceError null when the S3 check succeeds', async () => {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const collector = new StripeCollector(
+            makeStripeClient({ disputes: [openDispute(nowSec)] }),
+            {
+                evidenceProvider: {
+                    checkEvidence: async (items) =>
+                        items.map((it) => ({
+                            paymentId: it.paymentId,
+                            evidenceUploaded: true,
+                            evidenceSubmitted: false,
+                            batchNumber: 3,
+                        })),
+                },
+            },
+        );
+
+        const result = await collector.collect();
+        expect(result.disputes?.evidenceError).toBeNull();
+        expect(result.disputes?.disputes[0].evidenceUploaded).toBe(true);
+        expect(result.disputes?.disputes[0].evidenceBatch).toBe(3);
+    });
+});

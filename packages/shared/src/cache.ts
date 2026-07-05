@@ -7,6 +7,7 @@ import type {
     TransactionFeedMetrics,
     UserGrowthMetrics,
     PlatformSummaryMetrics,
+    CreatorSpotlightMetrics,
 } from './models.js';
 
 export interface CacheEntry<T> {
@@ -23,4 +24,5 @@ export interface MetricsStore {
     disputes: CacheEntry<DisputeMetrics>;
     transactions: CacheEntry<TransactionFeedMetrics>;
     summary: CacheEntry<PlatformSummaryMetrics>;
+    spotlight: CacheEntry<CreatorSpotlightMetrics>;
 }

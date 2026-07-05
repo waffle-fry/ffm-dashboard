@@ -98,6 +98,7 @@ function disputesPayload(): DisputeMetrics {
                 status: 'needs_response',
             },
         ],
+        evidenceError: null,
         lastRefreshed: ISO,
     };
 }

@@ -34,7 +34,7 @@ describe('disputeProgressSteps (Req 7.4, 7.5, 7.6)', () => {
         const steps = disputeProgressSteps(dispute());
         expect(steps).toHaveLength(2);
         expect(steps[0].label).toBe(EVIDENCE_UPLOAD_LABEL);
-        expect(steps[0].label).toBe('Evidence Upload (Andy)');
+        expect(steps[0].label).toBe('Evidence Upload');
         expect(steps[1].label).toBe(EVIDENCE_SUBMISSION_LABEL);
         expect(steps[1].label).toBe('Evidence Submission');
     });

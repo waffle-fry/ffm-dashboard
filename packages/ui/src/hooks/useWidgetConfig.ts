@@ -28,7 +28,7 @@ import type {
 export const WIDGET_CONFIG_STORAGE_KEY = 'fansfund.ops-dashboard.config';
 
 /** Config schema version written by this build. */
-export const DASHBOARD_CONFIG_VERSION = 1;
+export const DASHBOARD_CONFIG_VERSION = 2;
 
 /** Default refresh interval in minutes (Requirement 8.1 default). */
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 5;
@@ -48,6 +48,7 @@ export const KNOWN_WIDGET_TYPES: readonly WidgetType[] = [
     'dispute-progress',
     'transaction-feed',
     'platform-summary',
+    'creator-spotlight',
 ];
 
 const KNOWN_WIDGET_TYPE_SET: ReadonlySet<string> = new Set(KNOWN_WIDGET_TYPES);
@@ -68,12 +69,14 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardConfig = Object.freeze({
         { i: 'payment-counts', x: 4, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
         { i: 'user-growth', x: 8, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
         { i: 'platform-summary', x: 12, y: 0, w: 4, h: 4, minW: 2, minH: 2 },
-        // Middle/bottom left: system health then the two dispute widgets.
-        { i: 'system-health', x: 0, y: 4, w: 8, h: 4, minW: 2, minH: 2 },
-        { i: 'dispute-countdown', x: 0, y: 8, w: 4, h: 4, minW: 2, minH: 2 },
-        { i: 'dispute-progress', x: 4, y: 8, w: 4, h: 4, minW: 2, minH: 2 },
-        // Right column: the tall transaction feed spanning both lower bands.
-        { i: 'transaction-feed', x: 8, y: 4, w: 8, h: 8, minW: 2, minH: 2 },
+        // Middle band (rows 4-7): system health, the creator spotlight (about a
+        // third wide), and the tall transaction feed down the right column.
+        { i: 'system-health', x: 0, y: 4, w: 6, h: 4, minW: 2, minH: 2 },
+        { i: 'creator-spotlight', x: 6, y: 4, w: 5, h: 4, minW: 3, minH: 3 },
+        { i: 'transaction-feed', x: 11, y: 4, w: 5, h: 8, minW: 2, minH: 2 },
+        // Bottom band (rows 8-11): the two dispute widgets.
+        { i: 'dispute-countdown', x: 0, y: 8, w: 5, h: 4, minW: 2, minH: 2 },
+        { i: 'dispute-progress', x: 5, y: 8, w: 6, h: 4, minW: 2, minH: 2 },
     ],
     widgets: [
         { id: 'revenue', type: 'revenue', visible: true },
@@ -81,6 +84,7 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardConfig = Object.freeze({
         { id: 'user-growth', type: 'user-growth', visible: true },
         { id: 'platform-summary', type: 'platform-summary', visible: true },
         { id: 'system-health', type: 'system-health', visible: true },
+        { id: 'creator-spotlight', type: 'creator-spotlight', visible: true },
         { id: 'dispute-countdown', type: 'dispute-countdown', visible: true },
         { id: 'dispute-progress', type: 'dispute-progress', visible: true },
         { id: 'transaction-feed', type: 'transaction-feed', visible: true },
@@ -260,12 +264,55 @@ function sanitizeConfig(value: unknown): DashboardConfig {
 }
 
 /**
+ * One-time forward migration: when a stored config predates the current schema
+ * version, add any widgets present in the canonical default that the stored
+ * config is missing (with their default layout entry), then stamp the current
+ * version. This is how newly-introduced default widgets (e.g. the creator
+ * spotlight) appear for users who already have a saved layout, without
+ * disturbing their existing widgets/positions.
+ *
+ * Kept separate from {@link parseStoredConfig} (which must remain a pure
+ * round-trip/prune) and applied only on the hook's load path.
+ */
+export function migrateConfig(config: DashboardConfig): DashboardConfig {
+    if (config.version >= DASHBOARD_CONFIG_VERSION) {
+        return config;
+    }
+    const haveIds = new Set(config.widgets.map((w) => w.id));
+    const widgets = [...config.widgets];
+    const layout = [...config.layout];
+    // Stack any newly-added widgets below the existing content so they never
+    // overlap a user's current arrangement.
+    let y = nextFreeRow(layout);
+    for (const dw of DEFAULT_DASHBOARD_CONFIG.widgets) {
+        if (haveIds.has(dw.id)) continue;
+        widgets.push({ ...dw });
+        const dl = DEFAULT_DASHBOARD_CONFIG.layout.find((l) => l.i === dw.id);
+        const w = dl?.w ?? DEFAULT_WIDGET_LAYOUT.w;
+        const h = dl?.h ?? DEFAULT_WIDGET_LAYOUT.h;
+        layout.push({
+            i: dw.id,
+            x: 0,
+            y,
+            w,
+            h,
+            minW: dl?.minW ?? DEFAULT_WIDGET_LAYOUT.minW,
+            minH: dl?.minH ?? DEFAULT_WIDGET_LAYOUT.minH,
+        });
+        y += h;
+    }
+    return { ...config, version: DASHBOARD_CONFIG_VERSION, widgets, layout };
+}
+
+/**
  * Parse a raw localStorage string into a DashboardConfig, falling back to the
  * default config on any problem (null/empty, JSON parse error, or corrupt
  * shape) and pruning unavailable widget types from otherwise-valid configs.
  *
  * This is the pure, DOM-free entry point exercised directly by the property
- * tests in tasks 9.4 (round-trip) and 9.5 (invalid widget type removal).
+ * tests in tasks 9.4 (round-trip) and 9.5 (invalid widget type removal). It
+ * deliberately does NOT migrate — that is applied by the hook on load so the
+ * round-trip contract holds.
  */
 export function parseStoredConfig(raw: string | null): DashboardConfig {
     if (raw === null || raw === '') {
@@ -319,7 +366,9 @@ function writeRawConfig(config: DashboardConfig): void {
 
 /** Load and sanitize the persisted config (or the default) from localStorage. */
 export function loadStoredConfig(): DashboardConfig {
-    return parseStoredConfig(readRawConfig());
+    // Migration is applied here (not in parseStoredConfig, which stays a pure
+    // round-trip) so newly-introduced default widgets appear for existing users.
+    return migrateConfig(parseStoredConfig(readRawConfig()));
 }
 
 /**

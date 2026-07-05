@@ -5,7 +5,7 @@
 // is still outstanding and coordinate work (Requirement 7.6).
 //
 // Requirement 7.6: display each open dispute with a two-step progress indicator
-//   labelled exactly "Evidence Upload (Andy)" and "Evidence Submission", showing
+//   labelled exactly "Evidence Upload" and "Evidence Submission", showing
 //   each step as either "Complete" or "Outstanding".
 // Requirements 7.4 / 7.5: the completion of each step is decided by the engine
 //   (S3 + Stripe status) and delivered as the `evidenceUploaded` /
@@ -34,7 +34,7 @@ import { useMetrics } from '../hooks/useMetrics';
 import { useRefresh } from '../hooks/useRefresh';
 
 /** Exact label for the first (Evidence Upload) step (Requirement 7.6). */
-export const EVIDENCE_UPLOAD_LABEL = 'Evidence Upload (Andy)';
+export const EVIDENCE_UPLOAD_LABEL = 'Evidence Upload';
 /** Exact label for the second (Evidence Submission) step (Requirement 7.6). */
 export const EVIDENCE_SUBMISSION_LABEL = 'Evidence Submission';
 
@@ -140,6 +140,7 @@ export default function DisputeProgressWidget(): JSX.Element {
     const { refreshWidget } = useRefresh();
 
     const disputes = data?.disputes ?? [];
+    const evidenceError = data?.evidenceError ?? null;
 
     const handleRefresh = (): void => {
         void refreshWidget('disputes').then(() => refetch());
@@ -154,6 +155,20 @@ export default function DisputeProgressWidget(): JSX.Element {
             isStale={isStale}
             onRefresh={handleRefresh}
         >
+            {/* Non-fatal S3 evidence warning (Req 7): dispute amounts/deadlines
+                still show, but the evidence (upload/batch) columns are
+                unavailable — e.g. the engine lacks S3 read permissions. */}
+            {evidenceError && (
+                <div
+                    role="alert"
+                    className="mb-2 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+                >
+                    <span aria-hidden="true">⚠</span>
+                    <span className="min-w-0">
+                        Evidence status unavailable (S3): {evidenceError}
+                    </span>
+                </div>
+            )}
             {disputes.length === 0 ? (
                 <p className="text-text-secondary">No open disputes</p>
             ) : (

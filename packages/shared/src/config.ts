@@ -31,7 +31,8 @@ export type WidgetType =
     | 'dispute-countdown'
     | 'dispute-progress'
     | 'transaction-feed'
-    | 'platform-summary';
+    | 'platform-summary'
+    | 'creator-spotlight';
 
 export interface AggregatorConfig {
     refreshIntervalMinutes: number; // 1-60, default 5

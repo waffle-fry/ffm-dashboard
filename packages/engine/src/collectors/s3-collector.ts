@@ -3,7 +3,7 @@
 // Responsible for the AWS S3 side of dispute-process progress tracking
 // (Requirement 7). For each open dispute it inspects the dispute-docs bucket to
 // decide whether evidence documents have been uploaded, then classifies the two
-// progress steps ("Evidence Upload (Andy)" and "Evidence Submission") as
+// progress steps ("Evidence Upload" and "Evidence Submission") as
 // complete or outstanding.
 //
 // Data-flow / independence notes:

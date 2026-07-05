@@ -441,9 +441,12 @@ export class StripeCollector implements MetricCollector {
         let disputeItems = buildDisputeItems(disputes, now);
 
         // Enrich with S3 evidence flags when a provider is configured. This is
-        // best-effort: an S3 failure (e.g. IAM denied, timeout) must not break
-        // the Stripe metrics, so it is isolated in a try/catch and the disputes
-        // simply keep their "no evidence found" defaults on failure.
+        // best-effort for the Stripe metrics: an S3 failure (e.g. permissions
+        // denied, timeout) must NOT break the dispute amounts/deadlines, so it
+        // is isolated in a try/catch. The failure is surfaced to the UI via
+        // `evidenceError` (Req 7) so the team knows the evidence columns are
+        // unavailable rather than silently showing everything as "not uploaded".
+        let evidenceError: string | null = null;
         if (this.evidenceProvider !== undefined && disputeItems.length > 0) {
             try {
                 const evidence = await this.evidenceProvider.checkEvidence(
@@ -453,14 +456,16 @@ export class StripeCollector implements MetricCollector {
                     })),
                 );
                 disputeItems = mergeEvidence(disputeItems, evidence);
-            } catch {
-                // Keep the un-enriched dispute list; evidence stays at defaults.
+            } catch (error) {
+                evidenceError =
+                    error instanceof Error ? error.message : String(error);
             }
         }
 
         const disputeMetrics: DisputeMetrics = {
             nearestDeadlineDays: disputeItems.length > 0 ? disputeItems[0].daysRemaining : null,
             disputes: disputeItems,
+            evidenceError,
             lastRefreshed,
         };
 

@@ -3,7 +3,9 @@ import type { DashboardConfig } from '@fans-fund-me/shared';
 import {
     createDefaultConfig,
     DEFAULT_DASHBOARD_CONFIG,
+    DASHBOARD_CONFIG_VERSION,
     KNOWN_WIDGET_TYPES,
+    migrateConfig,
     parseStoredConfig,
     WIDGET_CONFIG_STORAGE_KEY,
 } from './useWidgetConfig';
@@ -16,6 +18,43 @@ beforeEach(() => {
 });
 afterEach(() => {
     warnSpy.mockRestore();
+});
+
+describe('migrateConfig (adds newly-introduced default widgets)', () => {
+    it('adds missing default widgets (e.g. creator-spotlight) to a pre-version config', () => {
+        const old: DashboardConfig = {
+            version: 1,
+            refreshIntervalMinutes: 5,
+            layout: [{ i: 'revenue', x: 0, y: 0, w: 4, h: 4 }],
+            widgets: [{ id: 'revenue', type: 'revenue', visible: true }],
+        };
+        const migrated = migrateConfig(old);
+        expect(migrated.version).toBe(DASHBOARD_CONFIG_VERSION);
+        // The creator-spotlight widget is now present...
+        expect(migrated.widgets.some((w) => w.type === 'creator-spotlight')).toBe(
+            true,
+        );
+        // ...with a layout entry placed BELOW the existing content (no overlap).
+        const spot = migrated.layout.find((l) => l.i === 'creator-spotlight');
+        expect(spot).toBeDefined();
+        expect(spot!.y).toBeGreaterThanOrEqual(4);
+        // The original widget is preserved.
+        expect(migrated.widgets.some((w) => w.id === 'revenue')).toBe(true);
+    });
+
+    it('is a no-op for a config already at the current version', () => {
+        const current = createDefaultConfig();
+        expect(migrateConfig(current)).toBe(current);
+    });
+
+    it('does not duplicate widgets that already exist', () => {
+        const migrated = migrateConfig({
+            ...createDefaultConfig(),
+            version: 1,
+        });
+        const ids = migrated.widgets.map((w) => w.id);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
 });
 
 describe('WIDGET_CONFIG_STORAGE_KEY', () => {

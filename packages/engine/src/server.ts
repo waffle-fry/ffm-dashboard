@@ -17,11 +17,13 @@ import { StripeCollector } from './collectors/stripe-collector.js';
 import { MongoCollector } from './collectors/mongo-collector.js';
 import { GrafanaCollector } from './collectors/grafana-collector.js';
 import { S3Collector, type OpenDisputeInput } from './collectors/s3-collector.js';
+import { SpotlightCollector } from './collectors/spotlight-collector.js';
 import {
     StripeClient,
     MongoClient,
     GrafanaClient,
     S3Client,
+    SpotlightClient,
 } from './clients/source-clients.js';
 import { consoleLogger } from './utils/log.js';
 
@@ -91,6 +93,11 @@ export function buildEngine(): EngineDependencies {
         new StripeCollector(new StripeClient(), { evidenceProvider: s3Evidence }),
         new MongoCollector(new MongoClient()),
         new GrafanaCollector(new GrafanaClient()),
+        // Single-creator spotlight panel. The username is configurable via
+        // SPOTLIGHT_USERNAME; it defaults to the creator this panel was built for.
+        new SpotlightCollector(new SpotlightClient(), {
+            username: process.env.SPOTLIGHT_USERNAME || 'yourstraightbf',
+        }),
     ];
 
     const refreshIntervalMinutes = Number(process.env.REFRESH_INTERVAL_MINUTES);

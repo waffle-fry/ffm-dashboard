@@ -32,6 +32,7 @@ export const METRIC_KEYS = [
     'disputes',
     'transactions',
     'summary',
+    'spotlight',
 ] as const satisfies readonly MetricKey[];
 
 /** Runtime type guard: true when `value` is one of the known metric keys. */
@@ -76,6 +77,7 @@ export class MetricsCache {
             disputes: emptyEntry(),
             transactions: emptyEntry(),
             summary: emptyEntry(),
+            spotlight: emptyEntry(),
         };
     }
 

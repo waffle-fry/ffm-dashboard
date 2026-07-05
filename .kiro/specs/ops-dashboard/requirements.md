@@ -13,7 +13,7 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 - **Dispute_Batch**: A numbered folder in S3 containing dispute evidence documents, located at s3://fans-fund-me-core-dispute-docs/batches/<number>/<payment-id>
 - **Creator**: A user on FansFund who receives anonymous payments from fans
 - **Fan**: A user on FansFund who sends anonymous payments to Creators
-- **Evidence_Upload**: The process of uploading dispute documents to S3, performed by Andy
+- **Evidence_Upload**: The process of uploading dispute documents to S3
 - **Evidence_Submission**: The process of submitting uploaded evidence to Stripe to respond to a dispute
 - **System_Health**: The operational status of FansFund services as reported by Grafana
 - **Dashboard_Engine**: The server-side component that aggregates data from MongoDB, Stripe, Grafana, and AWS S3
@@ -107,7 +107,7 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 3. WHEN no files exist or all files are zero bytes in the S3 path for a dispute, THE Dashboard_Engine SHALL mark the Evidence_Upload step as outstanding.
 4. IF evidence documents exist in S3 for a dispute AND the dispute status in Stripe is "needs_response", THEN THE Dashboard_Engine SHALL mark the Evidence_Submission step as outstanding.
 5. IF the dispute status in Stripe is "under_review" or "won" or "lost", THEN THE Dashboard_Engine SHALL mark both the Evidence_Upload and Evidence_Submission steps as complete.
-6. THE Dashboard_UI SHALL display each open dispute with a two-step progress indicator labeled "Evidence Upload (Andy)" and "Evidence Submission", showing each step as either "Complete" or "Outstanding".
+6. THE Dashboard_UI SHALL display each open dispute with a two-step progress indicator labeled "Evidence Upload" and "Evidence Submission", showing each step as either "Complete" or "Outstanding".
 7. THE Dashboard_Engine SHALL treat a dispute as open when its Stripe status is "warning_needs_response" or "needs_response" (the statuses still requiring a response from the team), and SHALL exclude disputes whose evidence has already been submitted or which are resolved — statuses "warning_under_review", "under_review", "won", "lost", and "charge_refunded" — from the open disputes list.
 
 ### Requirement 8: Data Refresh and Connectivity

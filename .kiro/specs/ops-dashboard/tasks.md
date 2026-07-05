@@ -332,7 +332,7 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
 
   - [x] 12.5 Implement DisputeProgressWidget
     - Create `packages/ui/src/widgets/DisputeProgressWidget.tsx`
-    - Display two-step progress per dispute: "Evidence Upload (Andy)" and "Evidence Submission"
+    - Display two-step progress per dispute: "Evidence Upload" and "Evidence Submission"
     - Each step shown as "Complete" or "Outstanding"
     - _Requirements: 7.4, 7.5, 7.6_
 
