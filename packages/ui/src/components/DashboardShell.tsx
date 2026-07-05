@@ -19,6 +19,7 @@ import WidgetGrid, { type WidgetDefinition } from './WidgetGrid';
 import { renderWidget } from '../widgets/registry';
 import ConfigPanel from './ConfigPanel';
 import Logo from './Logo';
+import HeaderStatus from './HeaderStatus';
 import { WIDGET_TITLES } from './widget-titles';
 
 export interface DashboardShellProps {
@@ -71,18 +72,21 @@ export default function DashboardShell({
         <div className="flex h-screen w-screen flex-col overflow-hidden bg-background font-body text-text-primary">
             <header className="flex items-center justify-between border-b border-border px-6 py-3">
                 <Logo height={36} className="text-text-primary" />
-                <button
-                    type="button"
-                    onClick={openConfig}
-                    aria-label="Configure dashboard"
-                    aria-haspopup="dialog"
-                    aria-expanded={isConfigOpen}
-                    title="Configure dashboard"
-                    className="shrink-0 rounded border border-border px-3 py-1 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
-                >
-                    <span aria-hidden="true">⚙</span>
-                    <span className="ml-2">Configure</span>
-                </button>
+                <div className="flex items-center gap-4">
+                    <HeaderStatus />
+                    <button
+                        type="button"
+                        onClick={openConfig}
+                        aria-label="Configure dashboard"
+                        aria-haspopup="dialog"
+                        aria-expanded={isConfigOpen}
+                        title="Configure dashboard"
+                        className="shrink-0 rounded border border-border px-3 py-1 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
+                    >
+                        <span aria-hidden="true">⚙</span>
+                        <span className="ml-2">Configure</span>
+                    </button>
+                </div>
             </header>
             <main className="min-h-0 flex-1 overflow-hidden">
                 <WidgetGrid
