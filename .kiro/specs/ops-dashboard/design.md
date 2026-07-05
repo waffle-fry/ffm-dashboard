@@ -244,9 +244,10 @@ RESTful endpoints serving cached metrics to the UI:
 - **Queries**: Count aggregations with date filters
 
 #### Grafana Integration
-- **Method**: Grafana HTTP API (`/api/health`, `/api/datasources/proxy`, `/api/alerts`)
-- **Auth**: API key via K8s Secret
-- **Data**: Service status, uptime metrics from Prometheus datasource queries
+- **Method**: Grafana HTTP API — Prometheus instant queries via the datasource proxy (`/api/datasources/proxy/uid/<uid>/api/v1/query`)
+- **Auth**: Service-account token (or legacy API key) via K8s Secret, sent as `Authorization: Bearer`
+- **Datasource**: `GRAFANA_DATASOURCE_UID` must be the **Prometheus** datasource that stores the metrics (e.g. `grafanacloud-prom`), not the Synthetic Monitoring datasource (which cannot run PromQL and returns 502)
+- **Data**: This deployment's frontend health comes from **Grafana Synthetic Monitoring** (blackbox probes). Per check job (`GRAFANA_SERVICES`): reachability/uptime from `probe_success` (and `avg_over_time(...[24h|7d])`), failed-execution counts from `probe_all_success_{count,sum}`, and latency from `probe_duration_seconds`
 
 #### AWS S3 Integration
 - **SDK**: `@aws-sdk/client-s3` (v3)
@@ -521,7 +522,7 @@ interface CacheEntry<T> {
 
 ### Property 12: Stale data detection
 
-*For any* cache entry with a lastUpdated timestamp and any current time, the isStale flag SHALL be true if and only if the difference between current time and lastUpdated exceeds 120 seconds.
+*For any* cache entry with a lastUpdated timestamp and any current time, the isStale flag SHALL be true if and only if the difference between current time and lastUpdated exceeds the staleness threshold, where the threshold is derived from the configured refresh interval plus a fixed grace margin (so on-cadence data is never flagged, and only a genuinely missed poll is).
 
 **Validates: Requirements 5.7**
 
@@ -634,7 +635,7 @@ interface CacheEntry<T> {
 
 - Cache entries are never cleared on error — only overwritten on success
 - `lastError` field stores the most recent error message and timestamp
-- `isStale` computed from `lastRefreshed` vs current time (threshold: 120s for health, configurable for others)
+- `isStale` computed from `lastRefreshed` vs current time (threshold = the configured refresh interval + a grace margin, so on-cadence data is never flagged stale)
 - On recovery, error state is cleared and fresh data replaces cache
 
 #### Frontend Error States

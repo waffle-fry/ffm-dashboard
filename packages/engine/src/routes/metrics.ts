@@ -19,6 +19,7 @@ import type { MetricsStore } from '@fans-fund-me/shared';
 import {
     MetricsCache,
     METRIC_KEYS,
+    DEFAULT_STALE_THRESHOLD_MS,
     type MetricKey,
 } from '../cache/metrics-cache.js';
 
@@ -35,6 +36,7 @@ export interface MetricResponse<K extends MetricKey> {
 function toMetricResponse<K extends MetricKey>(
     cache: MetricsCache,
     key: K,
+    thresholdMs: number,
 ): MetricResponse<K> {
     const entry = cache.get(key);
     return {
@@ -42,12 +44,18 @@ function toMetricResponse<K extends MetricKey>(
         lastRefreshed: entry.lastRefreshed,
         lastError: entry.lastError,
         isRefreshing: entry.isRefreshing,
-        isStale: cache.isStale(key),
+        isStale: cache.isStale(key, thresholdMs),
     };
 }
 
 /**
  * Creates the router mounted at `/api/metrics`.
+ *
+ * @param cache The metrics store to read from.
+ * @param getStaleThresholdMs Returns the current staleness threshold in ms.
+ *   Evaluated per request so it always reflects the live refresh interval
+ *   (which can change at runtime via `PUT /api/config`). Defaults to the
+ *   cache's own default threshold when omitted.
  *
  * Endpoints (one per widget/metric key):
  *   GET /api/metrics/revenue
@@ -57,12 +65,16 @@ function toMetricResponse<K extends MetricKey>(
  *   GET /api/metrics/transactions
  *   GET /api/metrics/summary
  */
-export function createMetricsRouter(cache: MetricsCache): Router {
+export function createMetricsRouter(
+    cache: MetricsCache,
+    getStaleThresholdMs?: () => number,
+): Router {
     const router = Router();
 
     for (const key of METRIC_KEYS) {
         router.get(`/${key}`, (_req: Request, res: Response): void => {
-            res.status(200).json(toMetricResponse(cache, key));
+            const thresholdMs = getStaleThresholdMs?.() ?? DEFAULT_STALE_THRESHOLD_MS;
+            res.status(200).json(toMetricResponse(cache, key, thresholdMs));
         });
     }
 

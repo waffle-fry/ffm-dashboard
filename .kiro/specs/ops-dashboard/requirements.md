@@ -81,7 +81,7 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 4. WHEN a Grafana alert is firing, THE Dashboard_UI SHALL highlight the affected service widget using the yellow/gold accent color.
 5. WHEN Grafana reports a service status change, THE Dashboard_Engine SHALL reflect the change within 60 seconds.
 6. IF the Grafana API is unreachable or returns an error, THEN THE Dashboard_UI SHALL display a visual indicator on the health metrics section stating that data is unavailable, and SHALL retain the last successfully retrieved values until a successful response is received.
-7. IF metric data for a monitored service has not been updated for more than 120 seconds, THEN THE Dashboard_UI SHALL display a stale-data indicator on the affected service widget.
+7. IF a widget's data has not been successfully refreshed for longer than the configured refresh interval plus a grace period, THEN THE Dashboard_UI SHALL display a stale-data indicator on the affected widget.
 
 ### Requirement 6: Dispute Deadline Tracking
 

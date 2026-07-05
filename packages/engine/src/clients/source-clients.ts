@@ -41,8 +41,13 @@
 //                                            favour of service-account tokens;
 //                                            both are sent as a Bearer token, so
 //                                            either works. Prefer the new name.
-//              GRAFANA_DATASOURCE_UID        (required; Prometheus datasource UID)
-//              GRAFANA_SERVICES              (required; comma-separated job names)
+//              GRAFANA_DATASOURCE_UID        (required; the Prometheus datasource
+//                                            UID that stores the metrics — e.g.
+//                                            `grafanacloud-prom`. NOT the
+//                                            Synthetic Monitoring datasource.)
+//              GRAFANA_SERVICES              (required; comma-separated Synthetic
+//                                            Monitoring check job names, i.e. the
+//                                            `job` label on the probe_* series)
 
 import Stripe from 'stripe';
 import { MongoClient as MongoDriver, type Db } from 'mongodb';
@@ -551,12 +556,18 @@ const SECONDS_PER_WEEK = 604_800;
  * tokens on the wire, so no code path differs).
  *
  * The set of monitored services and the datasource are deployment-specific and
- * supplied via env (`GRAFANA_SERVICES`, `GRAFANA_DATASOURCE_UID`). The PromQL
- * templates below assume a fairly conventional Prometheus setup:
- *   - `up{job="<svc>"}` for reachability/uptime;
- *   - `http_requests_total{status=~"5.."}` for 5xx error counts;
- *   - `http_request_duration_seconds_{sum,count}` histogram for latency;
- *   - the synthetic `ALERTS` series for firing alerts.
+ * supplied via env (`GRAFANA_SERVICES`, `GRAFANA_DATASOURCE_UID`). This
+ * deployment's frontend observability is **Grafana Synthetic Monitoring**
+ * (blackbox probes), whose metrics live in the hosted Prometheus datasource
+ * (`GRAFANA_DATASOURCE_UID` must therefore be the Prometheus datasource UID,
+ * e.g. `grafanacloud-prom`, NOT the Synthetic Monitoring datasource). Each
+ * entry in `GRAFANA_SERVICES` is a Synthetic Monitoring check job name (the
+ * `job` label on the probe series). The PromQL templates below use the
+ * Synthetic Monitoring metric family:
+ *   - `probe_success{job="<svc>"}` for reachability/uptime (1 = up);
+ *   - `avg_over_time(probe_success{job="<svc>"}[24h|7d])` for uptime %;
+ *   - `probe_all_success_{count,sum}` for failed-execution counts (errors);
+ *   - `probe_duration_seconds{job="<svc>"}` for probe latency.
  * Adjust the templates here if the deployment exposes different metric names.
  */
 export class GrafanaClient implements GrafanaClientPort {
@@ -642,16 +653,21 @@ export class GrafanaClient implements GrafanaClientPort {
 
         return Promise.all(
             services.map(async (svc): Promise<GrafanaServiceMetrics> => {
-                const [reachable, uptime24hFrac, uptime7dFrac, errorCount, alertFiring] =
+                // Synthetic Monitoring probe metrics (see class doc). A check
+                // may run from several probe locations, so aggregate across them:
+                // `min(probe_success)` is 1 only when every location is up, and
+                // uptime is the mean success ratio over the window.
+                const [reachable, uptime24hFrac, uptime7dFrac, failedExecutions] =
                     await Promise.all([
-                        this.queryScalar(`up{job="${svc}"}`),
-                        this.queryScalar(`avg_over_time(up{job="${svc}"}[24h])`),
-                        this.queryScalar(`avg_over_time(up{job="${svc}"}[7d])`),
+                        this.queryScalar(`min(probe_success{job="${svc}"})`),
+                        this.queryScalar(`avg(avg_over_time(probe_success{job="${svc}"}[24h]))`),
+                        this.queryScalar(`avg(avg_over_time(probe_success{job="${svc}"}[7d]))`),
+                        // Failed executions in the last 5m = total executions minus
+                        // successful ones. clamp_min guards against counter-reset
+                        // negatives.
                         this.queryScalar(
-                            `sum(increase(http_requests_total{job="${svc}",status=~"5.."}[5m]))`,
-                        ),
-                        this.queryScalar(
-                            `sum(ALERTS{alertname!="",alertstate="firing",job="${svc}"})`,
+                            `clamp_min(sum(increase(probe_all_success_count{job="${svc}"}[5m])) ` +
+                            `- sum(increase(probe_all_success_sum{job="${svc}"}[5m])), 0)`,
                         ),
                     ]);
 
@@ -666,30 +682,34 @@ export class GrafanaClient implements GrafanaClientPort {
                         totalSeconds: SECONDS_PER_WEEK,
                         downtimeSeconds: Math.round((1 - uptime7dFrac) * SECONDS_PER_WEEK),
                     },
-                    errorCountLast5m: errorCount,
-                    alertFiring: alertFiring > 0,
+                    errorCountLast5m: failedExecutions,
+                    // No separate firing-alert series is exported to Prometheus
+                    // here; treat a recent probe failure as the alert condition
+                    // (drives the gold highlight, Req 5.4).
+                    alertFiring: failedExecutions > 0,
                 };
             }),
         );
     }
 
     async getApiSamples(): Promise<GrafanaApiSamples> {
-        const [errorCount, latencySumRate, latencyCountRate] = await Promise.all([
-            this.queryScalar(`sum(increase(http_requests_total{status=~"5.."}[5m]))`),
-            this.queryScalar(`sum(rate(http_request_duration_seconds_sum[5m]))`),
-            this.queryScalar(`sum(rate(http_request_duration_seconds_count[5m]))`),
+        // Overall probe health/latency across all Synthetic Monitoring checks.
+        const [failedExecutions, avgDurationSec] = await Promise.all([
+            this.queryScalar(
+                `clamp_min(sum(increase(probe_all_success_count[5m])) ` +
+                `- sum(increase(probe_all_success_sum[5m])), 0)`,
+            ),
+            this.queryScalar(`avg(probe_duration_seconds)`),
         ]);
 
-        // The collector computes average latency as the mean of `latenciesMs`,
-        // so we hand it a single pre-averaged value. When there are no requests
-        // in the window (count rate 0) we return an empty sample set, which the
-        // collector treats as an average of 0.
-        const latenciesMs =
-            latencyCountRate > 0 ? [(latencySumRate / latencyCountRate) * 1000] : [];
+        // The collector averages `latenciesMs`, so hand it a single pre-averaged
+        // probe duration (converted from seconds to ms). An empty set when there
+        // are no probes yet is treated by the collector as an average of 0.
+        const latenciesMs = avgDurationSec > 0 ? [avgDurationSec * 1000] : [];
 
         return {
             windowMinutes: 5,
-            errorCount,
+            errorCount: failedExecutions,
             latenciesMs,
         };
     }

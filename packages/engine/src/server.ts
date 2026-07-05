@@ -12,6 +12,7 @@ import { createMetricsRouter } from './routes/metrics.js';
 import { createConfigRouter } from './routes/config.js';
 import { createRefreshRouter } from './routes/refresh.js';
 import { MetricsCache } from './cache/metrics-cache.js';
+import { staleThresholdMs } from './cache/metrics-cache.js';
 import { DataAggregator, type MetricCollector } from './aggregator/scheduler.js';
 import { StripeCollector } from './collectors/stripe-collector.js';
 import { MongoCollector } from './collectors/mongo-collector.js';
@@ -60,7 +61,9 @@ export function createApp({ cache, aggregator }: EngineDependencies): Express {
     });
 
     // API surface.
-    app.use('/api/metrics', createMetricsRouter(cache));
+    app.use('/api/metrics', createMetricsRouter(cache, () =>
+        staleThresholdMs(aggregator.getRefreshIntervalMinutes()),
+    ));
     app.use('/api/config', createConfigRouter(aggregator));
     app.use('/api/refresh', createRefreshRouter(aggregator));
 

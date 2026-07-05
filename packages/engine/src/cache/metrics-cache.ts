@@ -43,11 +43,31 @@ export function isMetricKey(value: unknown): value is MetricKey {
 /**
  * Default staleness threshold in milliseconds (120 seconds).
  *
- * Requirement 5.7 specifies a 120s window for system-health data. The threshold
- * is a parameter on `isStale` so other widgets can use a different value, but
- * this constant provides the documented default.
+ * Retained as the default for {@link MetricsCache.isStale} when no explicit
+ * threshold is supplied. In production the metrics route derives the threshold
+ * from the live refresh interval instead (see {@link staleThresholdMs}), so a
+ * widget is only "stale" when a poll has actually been missed rather than
+ * merely between two on-schedule polls.
  */
 export const DEFAULT_STALE_THRESHOLD_MS = 120_000;
+
+/**
+ * Grace margin (ms) added to the poll interval before data is considered stale.
+ *
+ * Absorbs the time a refresh cycle itself takes plus scheduler jitter, so
+ * data that arrives on the normal cadence is never flagged stale. Only a
+ * genuinely missed poll (elapsed > interval + grace) trips the indicator.
+ */
+export const STALE_GRACE_MS = 60_000;
+
+/**
+ * Staleness threshold derived from the polling interval (Requirement 5.7):
+ * `refreshIntervalMinutes` converted to ms, plus {@link STALE_GRACE_MS}. Pure
+ * and side-effect-free for direct unit testing.
+ */
+export function staleThresholdMs(refreshIntervalMinutes: number): number {
+    return refreshIntervalMinutes * 60_000 + STALE_GRACE_MS;
+}
 
 /** Builds a fresh, empty cache entry (no data yet). */
 function emptyEntry<T>(): CacheEntry<T> {

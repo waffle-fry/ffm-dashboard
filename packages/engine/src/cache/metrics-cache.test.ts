@@ -10,7 +10,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fc from 'fast-check';
-import { MetricsCache, DEFAULT_STALE_THRESHOLD_MS } from './metrics-cache.js';
+import {
+    MetricsCache,
+    DEFAULT_STALE_THRESHOLD_MS,
+    STALE_GRACE_MS,
+    staleThresholdMs,
+} from './metrics-cache.js';
 
 const BASE_TIME = Date.parse('2024-01-01T00:00:00.000Z');
 
@@ -70,5 +75,20 @@ describe('MetricsCache.isStale (Property 12: Stale data detection)', () => {
             }),
             { numRuns: 100 },
         );
+    });
+});
+
+describe('staleThresholdMs (interval-derived staleness threshold)', () => {
+    it('is the refresh interval in ms plus the grace margin', () => {
+        expect(staleThresholdMs(5)).toBe(5 * 60_000 + STALE_GRACE_MS);
+        expect(staleThresholdMs(1)).toBe(1 * 60_000 + STALE_GRACE_MS);
+        expect(staleThresholdMs(60)).toBe(60 * 60_000 + STALE_GRACE_MS);
+    });
+
+    it('never flags on-cadence data: elapsed up to one full interval stays fresh', () => {
+        // Data at most `interval` old (just before the next poll) is not stale.
+        const minutes = 5;
+        const threshold = staleThresholdMs(minutes);
+        expect(minutes * 60_000).toBeLessThan(threshold);
     });
 });

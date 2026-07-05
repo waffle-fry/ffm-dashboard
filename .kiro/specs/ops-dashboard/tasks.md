@@ -433,6 +433,19 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
   - [x] 19.3 Verify live
     - Build, `npm test`, deploy engine + UI, confirm the previously-outstanding dispute now shows Evidence Upload / Response Upload correctly.
 
+- [x] 20. Grafana Synthetic Monitoring health + interval-based staleness (Requirements 5.1–5.7)
+  - [x] 20.1 Point Grafana at the Prometheus datasource and Synthetic Monitoring metrics
+    - `GRAFANA_DATASOURCE_UID` must be the Prometheus datasource (e.g. `grafanacloud-prom`), not the Synthetic Monitoring datasource (which 502s on PromQL); `GRAFANA_SERVICES` is the SM check job name(s)
+    - Rewrote `GrafanaClient` PromQL to `probe_success` / `probe_all_success_{count,sum}` / `probe_duration_seconds`
+    - _Requirements: 5.1, 5.2, 5.3, 5.4_
+  - [x] 20.2 Derive the staleness threshold from the refresh interval
+    - Add `STALE_GRACE_MS` + `staleThresholdMs(refreshIntervalMinutes)`; the metrics route uses `interval + grace` so on-cadence data is never flagged stale (only a missed poll trips it)
+    - Update Property 12 wording + tests
+    - _Requirements: 5.7_
+  - [x] 20.3 Verify live
+    - Build, `npm test`, deploy engine, confirm `/api/metrics/health` returns data and the widget no longer shows a false "stale" badge.
+
+
 
 ## Notes
 
