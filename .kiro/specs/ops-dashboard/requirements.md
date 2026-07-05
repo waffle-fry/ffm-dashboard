@@ -10,11 +10,11 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 - **Widget**: A discrete, configurable UI component that displays a specific metric or group of related metrics
 - **Layout**: The arrangement of widgets on the dashboard grid
 - **Dispute**: A Stripe payment dispute (chargeback) that requires evidence submission within a deadline
-- **Dispute_Batch**: A numbered folder in S3 containing dispute evidence documents, located at s3://fans-fund-me-core-dispute-docs/batches/<number>/<payment-id>
+- **Dispute_Batch**: A numbered folder in S3 containing dispute evidence documents, located at s3://fans-fund-me-core-dispute-docs/batch_<number>/<payment-id>
 - **Creator**: A user on FansFund who receives anonymous payments from fans
 - **Fan**: A user on FansFund who sends anonymous payments to Creators
 - **Evidence_Upload**: The process of uploading dispute documents to S3
-- **Evidence_Submission**: The process of submitting uploaded evidence to Stripe to respond to a dispute
+- **Response_Upload**: The process of uploading the compiled response document (a PDF named `<payment-id>.pdf`) to the dispute's batch folder in S3
 - **System_Health**: The operational status of FansFund services as reported by Grafana
 - **Dashboard_Engine**: The server-side component that aggregates data from MongoDB, Stripe, Grafana, and AWS S3
 - **Dashboard_UI**: The client-side component that renders widgets and handles user interaction
@@ -105,12 +105,12 @@ FansFund is an anonymous payment platform connecting Creators and their fans. Th
 
 #### Acceptance Criteria
 
-1. THE Dashboard_Engine SHALL check AWS S3 at the path s3://fans-fund-me-core-dispute-docs/batches/<number>/<payment-id> to determine whether evidence documents have been uploaded for each open dispute, where the batch number is the most recent batch folder containing a subfolder matching the dispute's payment ID.
+1. THE Dashboard_Engine SHALL check AWS S3 at the path s3://fans-fund-me-core-dispute-docs/batch_<number>/<payment-id> to determine whether evidence documents have been uploaded for each open dispute, where the batch number is the most recent batch folder (`batch_<number>`) containing a subfolder matching the dispute's payment ID.
 2. WHEN at least one file of size greater than zero bytes exists in the S3 path for a dispute, THE Dashboard_Engine SHALL mark the Evidence_Upload step as complete.
 3. WHEN no files exist or all files are zero bytes in the S3 path for a dispute, THE Dashboard_Engine SHALL mark the Evidence_Upload step as outstanding.
-4. IF evidence documents exist in S3 for a dispute AND the dispute status in Stripe is "needs_response", THEN THE Dashboard_Engine SHALL mark the Evidence_Submission step as outstanding.
-5. IF the dispute status in Stripe is "under_review" or "won" or "lost", THEN THE Dashboard_Engine SHALL mark both the Evidence_Upload and Evidence_Submission steps as complete.
-6. THE Dashboard_UI SHALL display each open dispute with a two-step progress indicator labeled "Evidence Upload" and "Evidence Submission", showing each step as either "Complete" or "Outstanding".
+4. THE Dashboard_Engine SHALL mark the Response_Upload step as complete IF AND ONLY IF a response document named `<payment-id>.pdf` (greater than zero bytes) exists directly in the dispute's most recent batch folder, and SHALL mark it as outstanding otherwise.
+5. IF the dispute status in Stripe is "under_review" or "won" or "lost", THEN THE Dashboard_Engine SHALL mark both the Evidence_Upload and Response_Upload steps as complete.
+6. THE Dashboard_UI SHALL display each open dispute with a two-step progress indicator labeled "Evidence Upload" and "Response Upload", showing each step as either "Complete" or "Outstanding".
 7. THE Dashboard_Engine SHALL treat a dispute as open when its Stripe status is "warning_needs_response" or "needs_response" (the statuses still requiring a response from the team), and SHALL exclude disputes whose evidence has already been submitted or which are resolved — statuses "warning_under_review", "under_review", "won", "lost", and "charge_refunded" — from the open disputes list.
 
 ### Requirement 8: Data Refresh and Connectivity

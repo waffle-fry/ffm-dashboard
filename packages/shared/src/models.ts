@@ -76,8 +76,14 @@ export interface DisputeItem {
     paymentId: string;
     amountUsd: string; // "45.00" (USD, the platform's business currency)
     daysRemaining: number; // negative = overdue
+    /** True when at least one evidence file (>0 bytes) exists in the batch folder. */
     evidenceUploaded: boolean;
-    evidenceSubmitted: boolean;
+    /**
+     * True when the compiled response PDF named after the payment intent
+     * (`<paymentId>.pdf`, >0 bytes) exists in the dispute's batch folder — i.e.
+     * the "Response Upload" step is complete.
+     */
+    responseUploaded: boolean;
     /**
      * The most-recent S3 batch folder number that holds this dispute's uploaded
      * evidence, or null when no evidence has been uploaded (or the S3 check was

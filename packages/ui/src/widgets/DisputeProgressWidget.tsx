@@ -5,13 +5,13 @@
 // is still outstanding and coordinate work (Requirement 7.6).
 //
 // Requirement 7.6: display each open dispute with a two-step progress indicator
-//   labelled exactly "Evidence Upload" and "Evidence Submission", showing
+//   labelled exactly "Evidence Upload" and "Response Upload", showing
 //   each step as either "Complete" or "Outstanding".
 // Requirements 7.4 / 7.5: the completion of each step is decided by the engine
 //   (S3 + Stripe status) and delivered as the `evidenceUploaded` /
-//   `evidenceSubmitted` booleans on each `DisputeItem`. This widget purely
+//   `responseUploaded` booleans on each `DisputeItem`. This widget purely
 //   reflects those booleans — the Upload step mirrors `evidenceUploaded` and the
-//   Submission step mirrors `evidenceSubmitted`.
+//   Response step mirrors `responseUploaded`.
 //
 // Data comes from `useMetrics<DisputeMetrics>('disputes')` (polls
 // `/api/metrics/disputes`) and manual refresh is wired through
@@ -35,8 +35,8 @@ import { useRefresh } from '../hooks/useRefresh';
 
 /** Exact label for the first (Evidence Upload) step (Requirement 7.6). */
 export const EVIDENCE_UPLOAD_LABEL = 'Evidence Upload';
-/** Exact label for the second (Evidence Submission) step (Requirement 7.6). */
-export const EVIDENCE_SUBMISSION_LABEL = 'Evidence Submission';
+/** Exact label for the second (Response Upload) step (Requirement 7.6). */
+export const RESPONSE_UPLOAD_LABEL = 'Response Upload';
 
 /** The two literal status texts a step can display (Requirement 7.6). */
 export type StepStatusLabel = 'Complete' | 'Outstanding';
@@ -59,9 +59,9 @@ export function stepStatusLabel(complete: boolean): StepStatusLabel {
 /**
  * Build the two ordered progress steps for a dispute (Requirement 7.6).
  *
- * The Upload step reflects `evidenceUploaded` and the Submission step reflects
- * `evidenceSubmitted` — the booleans the engine computes per Requirements
- * 7.4/7.5. Order is always [Upload, Submission].
+ * The Upload step reflects `evidenceUploaded` and the Response step reflects
+ * `responseUploaded` — the booleans the engine computes per Requirements
+ * 7.4/7.5. Order is always [Evidence Upload, Response Upload].
  */
 export function disputeProgressSteps(dispute: DisputeItem): ProgressStep[] {
     return [
@@ -71,9 +71,9 @@ export function disputeProgressSteps(dispute: DisputeItem): ProgressStep[] {
             statusLabel: stepStatusLabel(dispute.evidenceUploaded),
         },
         {
-            label: EVIDENCE_SUBMISSION_LABEL,
-            complete: dispute.evidenceSubmitted,
-            statusLabel: stepStatusLabel(dispute.evidenceSubmitted),
+            label: RESPONSE_UPLOAD_LABEL,
+            complete: dispute.responseUploaded,
+            statusLabel: stepStatusLabel(dispute.responseUploaded),
         },
     ];
 }

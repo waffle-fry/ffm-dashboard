@@ -420,6 +420,20 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
 - [x] 18. Checkpoint - Platform account balances
   - Build, run `npm test`, deploy engine + UI, verify live via `/api/metrics/summary` and a browser check.
 
+- [x] 19. Dispute evidence path fix + Response Upload step (Requirement 7)
+  - [x] 19.1 Fix the S3 batch path scheme
+    - Batches live at the bucket root as `batch_<number>/<payment-id>/` (not `batches/<number>/...`); update `BATCH_PREFIX`, `buildEvidencePrefix`, and `batchNumberForKey` in `packages/engine/src/collectors/s3-collector.ts`
+    - _Requirements: 7.1_
+  - [x] 19.2 Rename "Evidence Submission" → "Response Upload" and drive it from S3
+    - Rename `DisputeItem.evidenceSubmitted` → `responseUploaded` (shared model + collectors + widget)
+    - Add `isResponseUploaded(objects, paymentId)` detecting a >0-byte `<payment-id>.pdf` in the batch folder; feed it into `classifyDisputeProgress`
+    - Relabel the second progress step to "Response Upload" in `DisputeProgressWidget`
+    - Update Property 17 + tests
+    - _Requirements: 7.4, 7.5, 7.6_
+  - [x] 19.3 Verify live
+    - Build, `npm test`, deploy engine + UI, confirm the previously-outstanding dispute now shows Evidence Upload / Response Upload correctly.
+
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

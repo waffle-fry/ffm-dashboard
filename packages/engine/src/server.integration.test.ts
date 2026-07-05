@@ -93,7 +93,7 @@ function disputesPayload(): DisputeMetrics {
                 amountUsd: '45.00',
                 daysRemaining: 3,
                 evidenceUploaded: true,
-                evidenceSubmitted: false,
+                responseUploaded: false,
                 evidenceBatch: 7,
                 status: 'needs_response',
             },

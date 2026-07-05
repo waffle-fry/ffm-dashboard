@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { DisputeItem } from '@fans-fund-me/shared';
 import {
     EVIDENCE_UPLOAD_LABEL,
-    EVIDENCE_SUBMISSION_LABEL,
+    RESPONSE_UPLOAD_LABEL,
     stepStatusLabel,
     disputeProgressSteps,
 } from './DisputeProgressWidget';
@@ -13,7 +13,7 @@ function dispute(overrides: Partial<DisputeItem> = {}): DisputeItem {
         amountUsd: '45.00',
         daysRemaining: 3,
         evidenceUploaded: false,
-        evidenceSubmitted: false,
+        responseUploaded: false,
         evidenceBatch: null,
         status: 'needs_response',
         ...overrides,
@@ -30,18 +30,18 @@ describe('stepStatusLabel (Req 7.6)', () => {
 });
 
 describe('disputeProgressSteps (Req 7.4, 7.5, 7.6)', () => {
-    it('uses the exact step labels in [Upload, Submission] order', () => {
+    it('uses the exact step labels in [Evidence Upload, Response Upload] order', () => {
         const steps = disputeProgressSteps(dispute());
         expect(steps).toHaveLength(2);
         expect(steps[0].label).toBe(EVIDENCE_UPLOAD_LABEL);
         expect(steps[0].label).toBe('Evidence Upload');
-        expect(steps[1].label).toBe(EVIDENCE_SUBMISSION_LABEL);
-        expect(steps[1].label).toBe('Evidence Submission');
+        expect(steps[1].label).toBe(RESPONSE_UPLOAD_LABEL);
+        expect(steps[1].label).toBe('Response Upload');
     });
 
-    it('maps evidenceUploaded to the Upload step and evidenceSubmitted to the Submission step', () => {
+    it('maps evidenceUploaded to the Upload step and responseUploaded to the Response step', () => {
         const steps = disputeProgressSteps(
-            dispute({ evidenceUploaded: true, evidenceSubmitted: false }),
+            dispute({ evidenceUploaded: true, responseUploaded: false }),
         );
         expect(steps[0].complete).toBe(true);
         expect(steps[0].statusLabel).toBe('Complete');
@@ -51,7 +51,7 @@ describe('disputeProgressSteps (Req 7.4, 7.5, 7.6)', () => {
 
     it('renders both Outstanding when neither step is done', () => {
         const steps = disputeProgressSteps(
-            dispute({ evidenceUploaded: false, evidenceSubmitted: false }),
+            dispute({ evidenceUploaded: false, responseUploaded: false }),
         );
         expect(steps.map((s) => s.statusLabel)).toEqual([
             'Outstanding',
@@ -61,7 +61,7 @@ describe('disputeProgressSteps (Req 7.4, 7.5, 7.6)', () => {
 
     it('renders both Complete when both steps are done', () => {
         const steps = disputeProgressSteps(
-            dispute({ evidenceUploaded: true, evidenceSubmitted: true }),
+            dispute({ evidenceUploaded: true, responseUploaded: true }),
         );
         expect(steps.map((s) => s.statusLabel)).toEqual([
             'Complete',
@@ -69,9 +69,9 @@ describe('disputeProgressSteps (Req 7.4, 7.5, 7.6)', () => {
         ]);
     });
 
-    it('does not couple the two steps (upload done, submission outstanding)', () => {
+    it('does not couple the two steps (upload done, response outstanding)', () => {
         const steps = disputeProgressSteps(
-            dispute({ evidenceUploaded: true, evidenceSubmitted: false }),
+            dispute({ evidenceUploaded: true, responseUploaded: false }),
         );
         expect(steps[0].statusLabel).toBe('Complete');
         expect(steps[1].statusLabel).toBe('Outstanding');

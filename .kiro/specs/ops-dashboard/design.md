@@ -252,7 +252,7 @@ RESTful endpoints serving cached metrics to the UI:
 - **SDK**: `@aws-sdk/client-s3` (v3)
 - **Auth**: IAM credentials via K8s Secret (or IRSA if available). Optionally assumes an IAM role via STS (`sts:AssumeRole`) when `AWS_ROLE_ARN` is set, using the base credentials to obtain auto-refreshing temporary credentials for the bucket.
 - **Bucket**: `fans-fund-me-core-dispute-docs`
-- **Operations**: `ListObjectsV2` to check for evidence files at `batches/<number>/<payment-id>/`
+- **Operations**: `ListObjectsV2` (prefix `batch_`) to check for evidence files at `batch_<number>/<payment-id>/`, and to detect the compiled response PDF `batch_<number>/<payment-id>/<payment-id>.pdf`
 
 #### Mercury Integration
 - **Method**: Mercury HTTP API via native `fetch` (Mercury ships no server SDK)
@@ -380,7 +380,7 @@ interface DisputeItem {
   amountUsd: string;         // "45.00" (USD, the platform's business currency)
   daysRemaining: number;     // negative = overdue
   evidenceUploaded: boolean;
-  evidenceSubmitted: boolean;
+  responseUploaded: boolean; // response PDF (<paymentId>.pdf) present in the batch folder
   evidenceBatch: number | null; // S3 batch folder number holding the evidence, or null when none found
   status: DisputeStatus;
 }
@@ -551,7 +551,7 @@ interface CacheEntry<T> {
 
 ### Property 17: Dispute progress step classification
 
-*For any* combination of (evidenceUploaded: boolean, disputeStatus: DisputeStatus), the progress determination SHALL mark both steps complete when status is 'under_review', 'won', or 'lost'; SHALL mark Evidence_Submission as outstanding when evidenceUploaded is true AND status is 'needs_response' or 'warning_needs_response'; and SHALL mark Evidence_Upload as outstanding when evidenceUploaded is false AND status indicates the dispute is open.
+*For any* combination of (evidenceUploaded: boolean, responsePdfUploaded: boolean, disputeStatus: DisputeStatus), the progress determination SHALL mark both steps complete when status is 'under_review', 'won', or 'lost'; SHALL set Response_Upload complete if and only if responsePdfUploaded is true (for every non-resolved status); and SHALL mark Evidence_Upload as outstanding when evidenceUploaded is false AND the dispute is open, treating it as complete otherwise.
 
 **Validates: Requirements 7.4, 7.5**
 

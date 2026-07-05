@@ -9,11 +9,11 @@
 // a size strictly greater than zero bytes.
 //
 // Task 6.14 / Property 17 (Validates Requirements 7.4, 7.5): for any
-// (evidenceUploaded, disputeStatus) pair, classifyDisputeProgress classifies the
-// two progress steps per the documented rules — both complete for the resolved
-// statuses, Evidence_Submission outstanding while a dispute is still open, and
-// Evidence_Upload outstanding only when no evidence was uploaded on an open
-// dispute.
+// (evidenceUploaded, responsePdfUploaded, disputeStatus) triple,
+// classifyDisputeProgress classifies the two progress steps per the documented
+// rules — both complete for the resolved statuses, Response_Upload reflecting
+// the response-PDF presence while a dispute is open, and Evidence_Upload
+// outstanding only when no evidence was uploaded on an open dispute.
 
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
@@ -21,10 +21,11 @@ import type { DisputeStatus } from '@fans-fund-me/shared';
 import { isOpenDispute } from '../utils/disputes.js';
 import {
     isEvidenceUploaded,
+    isResponseUploaded,
     classifyDisputeProgress,
     selectMostRecentBatchObjects,
     buildEvidencePrefix,
-    BATCHES_PREFIX,
+    BATCH_PREFIX,
     type S3ObjectSummary,
 } from './s3-collector.js';
 
@@ -125,31 +126,40 @@ describe('isEvidenceUploaded (Property 16: Evidence upload detection)', () => {
 describe('classifyDisputeProgress (Property 17: Dispute progress step classification)', () => {
     it('classifies both steps per the documented rules for every status/flag pair', () => {
         fc.assert(
-            fc.property(fc.boolean(), disputeStatusArb, (evidenceUploaded, status) => {
-                const result = classifyDisputeProgress(evidenceUploaded, status);
+            fc.property(
+                fc.boolean(),
+                fc.boolean(),
+                disputeStatusArb,
+                (evidenceUploaded, responsePdfUploaded, status) => {
+                    const result = classifyDisputeProgress(
+                        evidenceUploaded,
+                        responsePdfUploaded,
+                        status,
+                    );
 
-                // Independent oracle mirroring the documented behaviour.
-                let expectedUploaded: boolean;
-                let expectedSubmitted: boolean;
-                if (BOTH_STEPS_COMPLETE.has(status)) {
-                    // Requirement 7.5: resolved/under-review => both complete.
-                    expectedUploaded = true;
-                    expectedSubmitted = true;
-                } else {
-                    // Evidence_Upload is outstanding only for an open dispute
-                    // with no uploaded evidence; otherwise it counts complete.
-                    const uploadOutstanding = isOpenDispute(status) && !evidenceUploaded;
-                    expectedUploaded = !uploadOutstanding;
-                    // Evidence_Submission only completes via the both-complete
-                    // statuses above; it is outstanding for every other status.
-                    expectedSubmitted = false;
-                }
+                    // Independent oracle mirroring the documented behaviour.
+                    let expectedUploaded: boolean;
+                    let expectedResponse: boolean;
+                    if (BOTH_STEPS_COMPLETE.has(status)) {
+                        // Requirement 7.5: resolved/under-review => both complete.
+                        expectedUploaded = true;
+                        expectedResponse = true;
+                    } else {
+                        // Evidence_Upload is outstanding only for an open dispute
+                        // with no uploaded evidence; otherwise it counts complete.
+                        const uploadOutstanding =
+                            isOpenDispute(status) && !evidenceUploaded;
+                        expectedUploaded = !uploadOutstanding;
+                        // Response_Upload reflects the response-PDF presence.
+                        expectedResponse = responsePdfUploaded;
+                    }
 
-                expect(result).toEqual({
-                    evidenceUploaded: expectedUploaded,
-                    evidenceSubmitted: expectedSubmitted,
-                });
-            }),
+                    expect(result).toEqual({
+                        evidenceUploaded: expectedUploaded,
+                        responseUploaded: expectedResponse,
+                    });
+                },
+            ),
             { numRuns: 100 },
         );
     });
@@ -158,11 +168,14 @@ describe('classifyDisputeProgress (Property 17: Dispute progress step classifica
         fc.assert(
             fc.property(
                 fc.boolean(),
+                fc.boolean(),
                 fc.constantFrom<DisputeStatus>('under_review', 'won', 'lost'),
-                (evidenceUploaded, status) => {
-                    expect(classifyDisputeProgress(evidenceUploaded, status)).toEqual({
+                (evidenceUploaded, responsePdfUploaded, status) => {
+                    expect(
+                        classifyDisputeProgress(evidenceUploaded, responsePdfUploaded, status),
+                    ).toEqual({
                         evidenceUploaded: true,
-                        evidenceSubmitted: true,
+                        responseUploaded: true,
                     });
                 },
             ),
@@ -170,15 +183,17 @@ describe('classifyDisputeProgress (Property 17: Dispute progress step classifica
         );
     });
 
-    it('leaves Evidence_Submission outstanding when evidence uploaded on a needs-response status', () => {
+    it('reflects the response-PDF flag on the Response step for needs-response statuses', () => {
         fc.assert(
             fc.property(
+                fc.boolean(),
                 fc.constantFrom<DisputeStatus>('needs_response', 'warning_needs_response'),
-                (status) => {
-                    const result = classifyDisputeProgress(true, status);
-                    // Upload step complete (evidence present), submission still pending.
+                (responsePdfUploaded, status) => {
+                    // Evidence present so the upload step is complete; the
+                    // response step mirrors whether the PDF was found.
+                    const result = classifyDisputeProgress(true, responsePdfUploaded, status);
                     expect(result.evidenceUploaded).toBe(true);
-                    expect(result.evidenceSubmitted).toBe(false);
+                    expect(result.responseUploaded).toBe(responsePdfUploaded);
                 },
             ),
             { numRuns: 100 },
@@ -187,16 +202,58 @@ describe('classifyDisputeProgress (Property 17: Dispute progress step classifica
 
     it('marks Evidence_Upload outstanding when no evidence and dispute is open', () => {
         fc.assert(
-            fc.property(disputeStatusArb, (status) => {
-                const result = classifyDisputeProgress(false, status);
+            fc.property(fc.boolean(), disputeStatusArb, (responsePdfUploaded, status) => {
+                const result = classifyDisputeProgress(false, responsePdfUploaded, status);
                 if (isOpenDispute(status)) {
                     // Open + not uploaded => upload step outstanding.
                     expect(result.evidenceUploaded).toBe(false);
-                    expect(result.evidenceSubmitted).toBe(false);
                 }
             }),
             { numRuns: 100 },
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Response PDF detection (Requirement 7.4)
+// ---------------------------------------------------------------------------
+
+describe('isResponseUploaded (Requirement 7.4: response PDF detection)', () => {
+    const paymentId = 'pi_3TeCByBOfFH77gQa2HOwX39C';
+
+    it('is true when a >0-byte <paymentId>.pdf exists in the folder', () => {
+        const objects: S3ObjectSummary[] = [
+            { key: `${buildEvidencePrefix(49, paymentId)}evidence.jpg`, size: 100 },
+            { key: `${buildEvidencePrefix(49, paymentId)}${paymentId}.pdf`, size: 2048 },
+        ];
+        expect(isResponseUploaded(objects, paymentId)).toBe(true);
+    });
+
+    it('matches the .pdf extension case-insensitively', () => {
+        const objects: S3ObjectSummary[] = [
+            { key: `${buildEvidencePrefix(49, paymentId)}${paymentId}.PDF`, size: 2048 },
+        ];
+        expect(isResponseUploaded(objects, paymentId)).toBe(true);
+    });
+
+    it('is false when only other files (or a zero-byte response) are present', () => {
+        expect(
+            isResponseUploaded(
+                [
+                    { key: `${buildEvidencePrefix(49, paymentId)}evidence.pdf`, size: 500 },
+                    { key: `${buildEvidencePrefix(49, paymentId)}${paymentId}.pdf`, size: 0 },
+                ],
+                paymentId,
+            ),
+        ).toBe(false);
+        expect(isResponseUploaded([], paymentId)).toBe(false);
+    });
+
+    it('does not match a PDF named after a different payment id', () => {
+        const objects: S3ObjectSummary[] = [
+            { key: `${buildEvidencePrefix(49, paymentId)}pi_other.pdf`, size: 2048 },
+        ];
+        expect(isResponseUploaded(objects, paymentId)).toBe(false);
     });
 });
 
@@ -254,7 +311,7 @@ describe('selectMostRecentBatchObjects (most-recent batch selection)', () => {
                     // Objects for a DIFFERENT payment id must never match.
                     const otherId = `other-${paymentId}`;
                     const objects: S3ObjectSummary[] = batchNumbers.map((n, i) => ({
-                        key: `${BATCHES_PREFIX}${n}/${otherId}/file-${i}.pdf`,
+                        key: `${buildEvidencePrefix(n, otherId)}file-${i}.pdf`,
                         size: 1,
                     }));
                     expect(selectMostRecentBatchObjects(objects, paymentId)).toBeNull();

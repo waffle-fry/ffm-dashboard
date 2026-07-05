@@ -498,7 +498,7 @@ describe('StripeCollector dispute evidence errors', () => {
                         items.map((it) => ({
                             paymentId: it.paymentId,
                             evidenceUploaded: true,
-                            evidenceSubmitted: false,
+                            responseUploaded: false,
                             batchNumber: 3,
                         })),
                 },

@@ -130,8 +130,8 @@ export interface DisputeEvidenceResult {
     paymentId: string;
     /** Whether the Evidence_Upload step is complete. */
     evidenceUploaded: boolean;
-    /** Whether the Evidence_Submission step is complete. */
-    evidenceSubmitted: boolean;
+    /** Whether the Response_Upload step is complete (response PDF present). */
+    responseUploaded: boolean;
     /** The batch folder holding the evidence, or null when none found. */
     batchNumber: number | null;
 }
@@ -257,7 +257,7 @@ function disputeDueByIso(dispute: StripeDisputeRecord, now: Date): string {
  * to key the S3 evidence folders), falling back to the "ch_..." charge id when
  * no payment intent is present (Req 6.3, 7.1).
  *
- * `evidenceUploaded`/`evidenceSubmitted`/`evidenceBatch` are left at their
+ * `evidenceUploaded`/`responseUploaded`/`evidenceBatch` are left at their
  * "nothing found" defaults here: those come from the S3 evidence check and are
  * merged in by {@link mergeEvidence}. Open disputes always require a response,
  * so false/null is the correct starting state.
@@ -273,7 +273,7 @@ function buildDisputeItems(
             amountUsd: formatMoney(minorToMajor(dispute.amount)),
             daysRemaining: calculateDaysRemaining(disputeDueByIso(dispute, now), now),
             evidenceUploaded: false,
-            evidenceSubmitted: false,
+            responseUploaded: false,
             evidenceBatch: null,
             status: dispute.status,
         }))
@@ -298,7 +298,7 @@ function mergeEvidence(
         return {
             ...dispute,
             evidenceUploaded: result.evidenceUploaded,
-            evidenceSubmitted: result.evidenceSubmitted,
+            responseUploaded: result.responseUploaded,
             evidenceBatch: result.batchNumber,
         };
     });
@@ -375,7 +375,7 @@ export interface StripeCollectorOptions {
     disputeLookbackSec?: number;
     /**
      * Optional S3-backed evidence provider. When supplied, open disputes are
-     * enriched with `evidenceUploaded`/`evidenceSubmitted`/`evidenceBatch` from
+     * enriched with `evidenceUploaded`/`responseUploaded`/`evidenceBatch` from
      * S3. A failure here never breaks the Stripe metrics (see {@link StripeCollector.collect}).
      */
     evidenceProvider?: DisputeEvidenceProvider;

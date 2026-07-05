@@ -2,9 +2,9 @@
 //
 // Responsible for the AWS S3 side of dispute-process progress tracking
 // (Requirement 7). For each open dispute it inspects the dispute-docs bucket to
-// decide whether evidence documents have been uploaded, then classifies the two
-// progress steps ("Evidence Upload" and "Evidence Submission") as
-// complete or outstanding.
+// decide whether evidence documents have been uploaded and whether the compiled
+// response PDF has been uploaded, then classifies the two progress steps
+// ("Evidence Upload" and "Response Upload") as complete or outstanding.
 //
 // Data-flow / independence notes:
 //   - The full `DisputeMetrics` shape (nearest deadline, per-dispute amount in
@@ -35,8 +35,12 @@ import type { MetricKey } from '../cache/metrics-cache.js';
 /** The S3 bucket that holds dispute evidence documents (Requirement 7.1). */
 export const DISPUTE_DOCS_BUCKET = 'fans-fund-me-core-dispute-docs';
 
-/** Top-level key prefix under which numbered dispute batches live. */
-export const BATCHES_PREFIX = 'batches/';
+/**
+ * Top-level key prefix for the numbered dispute batch folders. Batches are
+ * named `batch_<number>/` at the root of the bucket (e.g. `batch_49/`), so a
+ * `ListObjectsV2` with this prefix returns every batch's contents.
+ */
+export const BATCH_PREFIX = 'batch_';
 
 /**
  * Minimal summary of a single S3 object, modelling the fields of a
@@ -44,7 +48,7 @@ export const BATCHES_PREFIX = 'batches/';
  * size in bytes (S3's `Size`).
  */
 export interface S3ObjectSummary {
-    /** The full object key, e.g. `batches/7/pi_abc123/evidence.pdf`. */
+    /** The full object key, e.g. `batch_49/pi_abc123/evidence.pdf`. */
     key: string;
     /** Object size in bytes. */
     size: number;
@@ -73,7 +77,7 @@ export interface OpenDisputeInput {
 /**
  * Per-dispute evidence/progress result.
  *
- * `evidenceUploaded` and `evidenceSubmitted` mirror the same-named fields on
+ * `evidenceUploaded` and `responseUploaded` mirror the same-named fields on
  * {@link DisputeItem} and represent whether each of the two progress steps is
  * COMPLETE (true) or OUTSTANDING (false).
  */
@@ -84,8 +88,8 @@ export interface DisputeProgress {
     status: DisputeStatus;
     /** True when the Evidence_Upload step is complete. */
     evidenceUploaded: boolean;
-    /** True when the Evidence_Submission step is complete. */
-    evidenceSubmitted: boolean;
+    /** True when the Response_Upload step is complete (response PDF present). */
+    responseUploaded: boolean;
     /**
      * The most-recent batch folder number that holds this dispute's evidence,
      * or null when no evidence was found in S3. Mirrors {@link DisputeItem.evidenceBatch}.
@@ -97,8 +101,8 @@ export interface DisputeProgress {
 // exposes; if the shared model changes, this line fails to compile.
 type _EvidenceFlagsMatchDisputeItem = [
     DisputeProgress['evidenceUploaded'],
-    DisputeProgress['evidenceSubmitted'],
-] extends [DisputeItem['evidenceUploaded'], DisputeItem['evidenceSubmitted']]
+    DisputeProgress['responseUploaded'],
+] extends [DisputeItem['evidenceUploaded'], DisputeItem['responseUploaded']]
     ? true
     : never;
 const _evidenceFlagsMatch: _EvidenceFlagsMatchDisputeItem = true;
@@ -132,36 +136,65 @@ export function isEvidenceUploaded(objects: readonly S3ObjectSummary[]): boolean
 
 /**
  * Builds the S3 key prefix for a dispute's evidence within a specific batch:
- * `batches/<number>/<payment-id>/` (Requirement 7.1).
+ * `batch_<number>/<payment-id>/` (Requirement 7.1).
  */
 export function buildEvidencePrefix(batchNumber: number, paymentId: string): string {
-    return `${BATCHES_PREFIX}${batchNumber}/${paymentId}/`;
+    return `${BATCH_PREFIX}${batchNumber}/${paymentId}/`;
+}
+
+/**
+ * Detects whether the compiled response PDF has been uploaded for a dispute
+ * (Requirement 7.4): a file named exactly `<paymentId>.pdf` (case-insensitive
+ * extension), with size > 0 bytes, directly inside the dispute's batch folder.
+ *
+ * @param objects Objects found under the dispute's batch/payment prefix.
+ * @param paymentId The dispute's payment id (the response PDF's base name).
+ */
+export function isResponseUploaded(
+    objects: readonly S3ObjectSummary[],
+    paymentId: string,
+): boolean {
+    return objects.some((object) => {
+        if (object.size <= 0) {
+            return false;
+        }
+        const slash = object.key.lastIndexOf('/');
+        const filename = slash >= 0 ? object.key.slice(slash + 1) : object.key;
+        const dot = filename.lastIndexOf('.');
+        if (dot < 0) {
+            return false;
+        }
+        const base = filename.slice(0, dot);
+        const ext = filename.slice(dot + 1).toLowerCase();
+        return base === paymentId && ext === 'pdf';
+    });
 }
 
 /**
  * Extracts the batch number for `paymentId` from an object key, or null when
  * the key does not belong to that payment's evidence folder.
  *
- * A key qualifies only when it has the shape `batches/<digits>/<paymentId>/…`,
+ * A key qualifies only when it has the shape `batch_<digits>/<paymentId>/…`,
  * i.e. there is at least one file segment beneath the payment-id folder.
  */
 function batchNumberForKey(key: string, paymentId: string): number | null {
-    if (!key.startsWith(BATCHES_PREFIX)) {
+    if (!key.startsWith(BATCH_PREFIX)) {
         return null;
     }
-    const segments = key.slice(BATCHES_PREFIX.length).split('/');
-    // Need: <number> / <paymentId> / <file...>
+    // Shape: batch_<number> / <paymentId> / <file...>
+    const segments = key.split('/');
     if (segments.length < 3) {
         return null;
     }
-    const [numberSegment, paymentSegment] = segments;
+    const [batchSegment, paymentSegment] = segments;
     if (paymentSegment !== paymentId) {
         return null;
     }
-    if (!/^\d+$/.test(numberSegment)) {
+    const match = /^batch_(\d+)$/.exec(batchSegment);
+    if (match === null) {
         return null;
     }
-    return Number(numberSegment);
+    return Number(match[1]);
 }
 
 /**
@@ -172,7 +205,7 @@ function batchNumberForKey(key: string, paymentId: string): number | null {
  * created with monotonically increasing numbers, so the largest number is the
  * newest. Returns null when no batch contains evidence for the payment id.
  *
- * @param objects A flat listing of objects under {@link BATCHES_PREFIX}.
+ * @param objects A flat listing of objects under {@link BATCH_PREFIX}.
  * @param paymentId The dispute's payment id (the subfolder name to match).
  */
 export function selectMostRecentBatchObjects(
@@ -203,16 +236,15 @@ export function selectMostRecentBatchObjects(
 /**
  * Dispute progress step classification (design Property 17; Requirements 7.4, 7.5).
  *
- * Given whether evidence was found in S3 and the Stripe dispute status, decides
- * whether each of the two steps is complete:
+ * Given whether evidence was found in S3, whether the response PDF was found,
+ * and the Stripe dispute status, decides whether each of the two steps is
+ * complete:
  *
  *   - Both steps are complete when the status is 'under_review', 'won', or
  *     'lost' (Requirement 7.5).
- *   - Otherwise Evidence_Submission is outstanding (it only completes once the
- *     dispute moves to one of the statuses above). In particular, when evidence
- *     has been uploaded and the status is 'needs_response' /
- *     'warning_needs_response', submission is the outstanding step
- *     (Requirement 7.4).
+ *   - Otherwise Response_Upload is complete IF AND ONLY IF the response PDF was
+ *     found in the batch folder (`responsePdfUploaded`) — this is the
+ *     `<paymentId>.pdf` compiled response (Requirement 7.4).
  *   - Evidence_Upload is outstanding IF AND ONLY IF no evidence was uploaded and
  *     the dispute is still open (reuses {@link isOpenDispute}); for any other
  *     state the upload step is treated as complete.
@@ -221,10 +253,11 @@ export function selectMostRecentBatchObjects(
  */
 export function classifyDisputeProgress(
     evidenceUploaded: boolean,
+    responsePdfUploaded: boolean,
     status: DisputeStatus,
-): { evidenceUploaded: boolean; evidenceSubmitted: boolean } {
+): { evidenceUploaded: boolean; responseUploaded: boolean } {
     if (BOTH_STEPS_COMPLETE_STATUSES.has(status)) {
-        return { evidenceUploaded: true, evidenceSubmitted: true };
+        return { evidenceUploaded: true, responseUploaded: true };
     }
 
     // Evidence_Upload is only "outstanding" for an open dispute that has no
@@ -233,9 +266,9 @@ export function classifyDisputeProgress(
 
     return {
         evidenceUploaded: !uploadOutstanding,
-        // Evidence_Submission completes only via the both-complete statuses
-        // handled above; for every open/unresolved status it is outstanding.
-        evidenceSubmitted: false,
+        // Response_Upload reflects whether the compiled `<paymentId>.pdf`
+        // response has been uploaded to the batch folder.
+        responseUploaded: responsePdfUploaded,
     };
 }
 
@@ -288,30 +321,33 @@ export class S3Collector implements MetricCollector {
     /**
      * Determines evidence/progress for each supplied open dispute.
      *
-     * Lists the objects under {@link BATCHES_PREFIX} once, then for every dispute
+     * Lists the objects under {@link BATCH_PREFIX} once, then for every dispute
      * selects the most recent batch folder containing that payment id
      * (Requirement 7.1), decides upload status from the listed object sizes
-     * (Property 16), and classifies the two progress steps (Property 17).
+     * (Property 16), detects the compiled response PDF (Requirement 7.4), and
+     * classifies the two progress steps (Property 17).
      *
      * This is the method the wiring task (8.1) calls with the Stripe dispute list
-     * to populate `DisputeItem.evidenceUploaded` / `.evidenceSubmitted`.
+     * to populate `DisputeItem.evidenceUploaded` / `.responseUploaded`.
      */
     async checkEvidence(
         disputes: readonly OpenDisputeInput[],
     ): Promise<DisputeProgress[]> {
-        // A single listing under `batches/` is reused for every dispute so we
+        // A single listing under `batch_` is reused for every dispute so we
         // make one S3 round-trip regardless of dispute count.
-        const objects = await this.client.listObjects(BATCHES_PREFIX);
+        const objects = await this.client.listObjects(BATCH_PREFIX);
 
         return disputes.map((dispute) => {
             const batch = selectMostRecentBatchObjects(objects, dispute.paymentId);
-            const uploaded = isEvidenceUploaded(batch?.objects ?? []);
-            const progress = classifyDisputeProgress(uploaded, dispute.status);
+            const batchObjects = batch?.objects ?? [];
+            const uploaded = isEvidenceUploaded(batchObjects);
+            const responsePdf = isResponseUploaded(batchObjects, dispute.paymentId);
+            const progress = classifyDisputeProgress(uploaded, responsePdf, dispute.status);
             return {
                 paymentId: dispute.paymentId,
                 status: dispute.status,
                 evidenceUploaded: progress.evidenceUploaded,
-                evidenceSubmitted: progress.evidenceSubmitted,
+                responseUploaded: progress.responseUploaded,
                 // Surface the batch number only when evidence was actually found
                 // in S3; a batch folder with no non-empty objects does not count.
                 batchNumber: uploaded && batch !== null ? batch.batchNumber : null,
