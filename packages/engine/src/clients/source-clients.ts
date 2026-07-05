@@ -665,7 +665,14 @@ export class SpotlightClient implements SpotlightSource {
             .collection('Payments')
             .find(
                 { recipientId: profileId },
-                { projection: { state: 1, recipientAmount: 1, recipientCurrency: 1 } },
+                {
+                    projection: {
+                        state: 1,
+                        recipientAmount: 1,
+                        recipientCurrency: 1,
+                        createdUnixMilli: 1,
+                    },
+                },
             )
             .toArray();
         return docs.map((doc) => ({
@@ -676,6 +683,8 @@ export class SpotlightClient implements SpotlightSource {
                 typeof doc.recipientCurrency === 'string'
                     ? doc.recipientCurrency
                     : 'GBP',
+            createdUnixMilli:
+                typeof doc.createdUnixMilli === 'number' ? doc.createdUnixMilli : 0,
         }));
     }
 

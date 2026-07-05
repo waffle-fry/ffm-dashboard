@@ -111,6 +111,19 @@ export interface TransactionItem {
 }
 
 // Creator Spotlight (a focused panel for a single creator/user).
+
+/** A single recent payment received by the spotlighted creator. */
+export interface CreatorPayment {
+    /** Recipient amount, 2dp in the creator's currency (what they received). */
+    amount: string;
+    /** ISO 4217 currency code of the amount (e.g. "GBP"). */
+    currency: string;
+    /** Raw payment state, e.g. "succeeded", "requires_payment_method". */
+    state: string;
+    /** ISO 8601 timestamp the payment was created (for a relative "… ago"). */
+    timestamp: string;
+}
+
 export interface CreatorSpotlightMetrics {
     /** Platform username being spotlighted. */
     username: string;
@@ -133,6 +146,9 @@ export interface CreatorSpotlightMetrics {
     totalPaymentCount: number;
     /** Total value of successful payments received, 2dp in the creator's currency. */
     succeededPaymentValue: string;
+
+    /** The creator's most recent payments (newest first), with state + timestamp. */
+    recentPayments: CreatorPayment[];
 
     /** Available Stripe balance (2dp, creator currency), or null when unavailable. */
     balanceAvailable: string | null;

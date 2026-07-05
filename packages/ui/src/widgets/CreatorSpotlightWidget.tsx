@@ -12,8 +12,30 @@
 import type { CreatorSpotlightMetrics } from '@fans-fund-me/shared';
 import Widget from '../components/Widget';
 import { formatCurrencyAmount } from '../components/currency';
+import { formatRelativeTime } from '../components/time-format';
 import { useMetrics } from '../hooks/useMetrics';
 import { useRefresh } from '../hooks/useRefresh';
+
+/** Human-readable label for a raw payment state. */
+const STATE_LABELS: Record<string, string> = {
+    succeeded: 'Succeeded',
+    requires_payment_method: 'Incomplete',
+    requires_action: 'Pending',
+    processing: 'Processing',
+    canceled: 'Canceled',
+};
+
+/** Prettify a raw payment state for display. */
+function stateLabel(state: string): string {
+    return STATE_LABELS[state] ?? state.replace(/_/g, ' ');
+}
+
+/** Brand colour class for a payment state (green ok, red canceled, else muted). */
+function stateClass(state: string): string {
+    if (state === 'succeeded') return 'text-success';
+    if (state === 'canceled') return 'text-danger';
+    return 'text-text-secondary';
+}
 
 /** A single labelled stat. */
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
@@ -55,6 +77,8 @@ export default function CreatorSpotlightWidget({
     const handleRefresh = (): void => {
         void refreshWidget('spotlight').then(() => refetch());
     };
+
+    const now = Date.now();
 
     return (
         <Widget
@@ -132,12 +156,45 @@ export default function CreatorSpotlightWidget({
                         )}
                     </div>
 
-                    {/* Footer meta */}
-                    <div className="mt-auto text-xs text-text-secondary">
-                        {data.totalPaymentCount} total payment attempts
-                        {data.acceptingPayments === false &&
-                            ' · not accepting payments'}
+                    {/* Recent payments (newest first) with status + relative time. */}
+                    <div className="flex min-h-0 flex-col">
+                        <div className="mb-1 text-xs uppercase tracking-wide text-text-secondary">
+                            Recent payments
+                        </div>
+                        {data.recentPayments.length === 0 ? (
+                            <p className="text-sm text-text-secondary">
+                                No payments yet.
+                            </p>
+                        ) : (
+                            <ul className="flex flex-col divide-y divide-border">
+                                {data.recentPayments.map((p, i) => (
+                                    <li
+                                        key={`${p.timestamp}-${i}`}
+                                        className="flex items-center justify-between gap-2 py-1.5 text-sm"
+                                    >
+                                        <span className="w-20 shrink-0 tabular-nums text-text-primary">
+                                            {formatCurrencyAmount(p.amount, p.currency)}
+                                        </span>
+                                        <span
+                                            className={`flex-1 truncate text-xs ${stateClass(p.state)}`}
+                                        >
+                                            {stateLabel(p.state)}
+                                        </span>
+                                        <span className="shrink-0 text-xs text-text-secondary">
+                                            {formatRelativeTime(p.timestamp, now)}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
+
+                    {/* Only surface the not-accepting-payments flag when set. */}
+                    {data.acceptingPayments === false && (
+                        <div className="text-xs text-danger">
+                            Not accepting payments
+                        </div>
+                    )}
                 </div>
             )}
         </Widget>

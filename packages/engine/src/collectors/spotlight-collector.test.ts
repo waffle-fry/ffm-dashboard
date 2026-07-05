@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     SpotlightCollector,
     aggregatePayments,
+    selectRecentPayments,
     type SpotlightSource,
     type SpotlightProfile,
     type SpotlightPayment,
@@ -17,11 +18,12 @@ const PROFILE: SpotlightProfile = {
     acceptingPayments: true,
 };
 
+const T0 = Date.parse('2026-07-01T00:00:00.000Z');
 const PAYMENTS: SpotlightPayment[] = [
-    { state: 'succeeded', recipientAmount: 550, recipientCurrency: 'GBP' },
-    { state: 'succeeded', recipientAmount: 1000, recipientCurrency: 'GBP' },
-    { state: 'requires_payment_method', recipientAmount: 999, recipientCurrency: 'GBP' },
-    { state: 'canceled', recipientAmount: 100, recipientCurrency: 'GBP' },
+    { state: 'succeeded', recipientAmount: 550, recipientCurrency: 'GBP', createdUnixMilli: T0 + 1000 },
+    { state: 'succeeded', recipientAmount: 1000, recipientCurrency: 'GBP', createdUnixMilli: T0 + 4000 },
+    { state: 'requires_payment_method', recipientAmount: 999, recipientCurrency: 'GBP', createdUnixMilli: T0 + 3000 },
+    { state: 'canceled', recipientAmount: 100, recipientCurrency: 'GBP', createdUnixMilli: T0 + 2000 },
 ];
 
 /** Builds a SpotlightSource fake with overridable behaviour. */
@@ -52,6 +54,27 @@ describe('aggregatePayments', () => {
     });
 });
 
+describe('selectRecentPayments', () => {
+    it('returns payments newest-first, formatted, limited', () => {
+        const recent = selectRecentPayments(PAYMENTS, 3);
+        expect(recent).toHaveLength(3);
+        // Newest first by createdUnixMilli: 1000(+4000), 999(+3000), 100(+2000).
+        expect(recent.map((p) => p.amount)).toEqual(['10.00', '9.99', '1.00']);
+        expect(recent[0]).toEqual({
+            amount: '10.00',
+            currency: 'GBP',
+            state: 'succeeded',
+            timestamp: new Date(T0 + 4000).toISOString(),
+        });
+    });
+
+    it('does not mutate the input array', () => {
+        const copy = [...PAYMENTS];
+        selectRecentPayments(PAYMENTS);
+        expect(PAYMENTS).toEqual(copy);
+    });
+});
+
 describe('SpotlightCollector', () => {
     it('assembles the payload with payments and balance', async () => {
         const collector = new SpotlightCollector(makeSource(), {
@@ -69,6 +92,9 @@ describe('SpotlightCollector', () => {
         expect(s.balanceError).toBeNull();
         expect(s.profileError).toBeNull();
         expect(s.stripeAccountId).toBe('acct_1');
+        // Recent payments included, newest first.
+        expect(s.recentPayments).toHaveLength(4);
+        expect(s.recentPayments[0].amount).toBe('10.00');
     });
 
     it('surfaces a balance error but still reports payments', async () => {

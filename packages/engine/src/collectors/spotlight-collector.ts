@@ -21,12 +21,15 @@
 // {@link SpotlightSource} port, so the aggregation is unit-testable without
 // Mongo/Stripe. The concrete adapter is wired in server.ts.
 
-import type { CreatorSpotlightMetrics } from '@fans-fund-me/shared';
+import type { CreatorSpotlightMetrics, CreatorPayment } from '@fans-fund-me/shared';
 import type { CollectedMetrics, MetricCollector } from '../aggregator/scheduler.js';
 import { formatMoney } from '../utils/formatting.js';
 
 /** The payment state that counts as a completed, successful payment. */
 export const SUCCEEDED_PAYMENT_STATE = 'succeeded';
+
+/** How many recent payments the spotlight surfaces (newest first). */
+export const RECENT_PAYMENTS_LIMIT = 6;
 
 /** Minor units per major unit (e.g. 100 pence per pound). */
 const MINOR_UNITS_PER_MAJOR = 100;
@@ -60,6 +63,8 @@ export interface SpotlightPayment {
     recipientAmount: number;
     /** ISO 4217 currency code of the recipient amount. */
     recipientCurrency: string;
+    /** Creation time in Unix milliseconds (from `createdUnixMilli`). */
+    createdUnixMilli: number;
 }
 
 /** Available/pending balance for a Stripe account, in MINOR units. */
@@ -121,6 +126,27 @@ function minorToFormatted(minor: number): string {
     return formatMoney(minor / MINOR_UNITS_PER_MAJOR);
 }
 
+/**
+ * Selects the most recent `limit` payments (newest first) and maps them to the
+ * API {@link CreatorPayment} shape: recipient amount formatted in the creator's
+ * currency, the raw state, and an ISO timestamp for a relative "… ago" display.
+ * Pure over the input.
+ */
+export function selectRecentPayments(
+    payments: readonly SpotlightPayment[],
+    limit: number = RECENT_PAYMENTS_LIMIT,
+): CreatorPayment[] {
+    return [...payments]
+        .sort((a, b) => b.createdUnixMilli - a.createdUnixMilli)
+        .slice(0, limit)
+        .map((payment) => ({
+            amount: minorToFormatted(payment.recipientAmount),
+            currency: payment.recipientCurrency,
+            state: payment.state,
+            timestamp: new Date(payment.createdUnixMilli).toISOString(),
+        }));
+}
+
 /** Construction options for {@link SpotlightCollector}. */
 export interface SpotlightCollectorOptions {
     /** Platform username to spotlight. */
@@ -163,6 +189,7 @@ export class SpotlightCollector implements MetricCollector {
                 succeededPaymentCount: 0,
                 totalPaymentCount: 0,
                 succeededPaymentValue: formatMoney(0),
+                recentPayments: [],
                 balanceAvailable: null,
                 balancePending: null,
                 balanceError: null,
@@ -211,6 +238,7 @@ export class SpotlightCollector implements MetricCollector {
             succeededPaymentCount: totals.succeededCount,
             totalPaymentCount: totals.totalCount,
             succeededPaymentValue: minorToFormatted(totals.succeededMinor),
+            recentPayments: selectRecentPayments(payments),
             balanceAvailable,
             balancePending,
             balanceError,
