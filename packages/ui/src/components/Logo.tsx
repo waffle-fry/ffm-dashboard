@@ -1,18 +1,14 @@
 // Logo — the FansFund ("FFM") brand wordmark for the dashboard header.
 //
-// This renders the real brand asset directly: an <img> pointing at
-// `/ffm-logo.png`, which is served from the UI's `public/` directory (Vite
-// copies `packages/ui/public/*` into the build, and Nginx serves it at the
-// site root). Drop the official logo file at `packages/ui/public/ffm-logo.png`
-// and it appears here at any height with the correct aspect ratio.
+// Renders the real brand image. The PNG is imported as a module asset so Vite
+// bundles it (with a hashed, cached filename) into the build — this works with
+// the existing Docker build, which copies `packages/ui/src` (unlike `public/`,
+// which the Dockerfile does not copy).
 //
-// If the asset is missing (404), we fall back to a simple bold "FFM" wordmark so
-// the header never shows a broken-image icon.
+// To replace the logo, drop a new file at `src/assets/ffm-logo.png`.
 
 import { useState } from 'react';
-
-/** Path (site root) the logo image is served from. See packages/ui/public. */
-export const LOGO_SRC = '/ffm-logo.png';
+import logoSrc from '../assets/ffm-logo.png';
 
 export interface LogoProps {
     /** Rendered height in px (width scales to preserve aspect ratio). Default 40. */
@@ -25,7 +21,7 @@ export default function Logo({ height = 40, className = '' }: LogoProps): JSX.El
     const [failed, setFailed] = useState(false);
 
     if (failed) {
-        // Minimal, clean fallback wordmark when the image asset is unavailable.
+        // Defensive fallback if the image ever fails to load at runtime.
         return (
             <span
                 aria-label="Fans Fund Me"
@@ -40,7 +36,7 @@ export default function Logo({ height = 40, className = '' }: LogoProps): JSX.El
 
     return (
         <img
-            src={LOGO_SRC}
+            src={logoSrc}
             alt="Fans Fund Me"
             style={{ height, width: 'auto' }}
             className={className}
