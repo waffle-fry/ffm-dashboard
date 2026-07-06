@@ -467,6 +467,14 @@ This plan implements a full-stack operational dashboard for the FansFund team. T
     - `doctor.sh`: added a Git/auto-update section (branch check, `git ls-remote` reachability with the launchd credential caveat, ahead/behind, last log line). KIOSK.md troubleshooting for git credentials under launchd.
     - _Requirements: 12.5, 12.6, 12.7_
 
+- [x] 23. Kiosk device quieting (suppress macOS interruptions)
+  - [x] 23.1 `quiet-macos.sh` + `make kiosk-quiet`
+    - Best-effort: disable automatic macOS/App Store updates (the recurring update password prompt), the screen saver, and display/system sleep (sudo, reversible). Prints the GUI-only steps (Do Not Disturb Focus, lock-screen password) and recommends a Configuration Profile for enforcement.
+    - KIOSK.md "Silence the device (kiosk hardening)" section.
+    - Also documents the **editor auto-update** helper-tool prompt (VS Code / Kiro): don't run the editor on the kiosk (remove from Login Items) or set `"update.mode": "none"` — this, not macOS, is the observed prompt on the device.
+    - Host-config only — no app change; validated by `bash -n` (the settings are applied by the operator on the device).
+    - _Requirements: 12.3 (only the dashboard visible/undisturbed)_
+
 
 
 ## Notes

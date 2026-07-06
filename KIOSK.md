@@ -104,6 +104,56 @@ launchctl kickstart -k gui/$(id -u)/com.fansfund.dashboard.kiosk
 make kiosk-uninstall
 ```
 
+## Silence the device (kiosk hardening)
+
+Stop macOS interruptions from covering the dashboard (the software-update
+password prompt, notification banners, the screen saver):
+
+```bash
+make kiosk-quiet
+```
+
+That best-effort helper disables automatic macOS/App Store updates (the source
+of the recurring password prompt), the screen saver, and display/system sleep.
+It prompts for `sudo` and is fully reversible in System Settings.
+
+Two things it can't script (do them once in the GUI):
+
+- **Notifications** — menu-bar date/time → Focus → **Do Not Disturb** on, and add
+  a Focus schedule that's on 24/7. Fullscreen apps do not auto-silence
+  notifications, so this is required.
+- **Lock screen** — System Settings → Lock Screen → "Start Screen Saver when
+  inactive" = Never, and "Require password after…" = Never.
+
+### Editor auto-update prompt (VS Code / Kiro)
+
+If the admin password prompt is an **editor trying to install a helper tool**
+(e.g. "Visual Studio Code wants to install …"), that's the editor's
+**auto-updater** (Squirrel/ShipIt), not macOS:
+
+- **Preferred:** don't run the editor on the kiosk — remove it from System
+  Settings → General → **Login Items** and quit it. The kiosk needs only Chrome,
+  Docker, and the launch agents.
+- **If it must run:** disable auto-update in its User Settings (JSON):
+
+  ```json
+  "update.mode": "none",
+  "extensions.autoUpdate": false,
+  "extensions.autoCheckUpdates": false
+  ```
+
+  (VS Code: `~/Library/Application Support/Code/User/settings.json`.)
+
+Also confirm System Settings → General → Software Update → Automatic Updates →
+**"Install macOS updates" is OFF** — this stops the *macOS* update password
+prompt (a separate source of interruptions).
+
+**Most reliable option:** enforce all of the above with a **Configuration
+Profile** (`.mobileconfig`) — it survives reboots and OS updates and is the
+sanctioned way to lock down a single-purpose device. `defaults`-based tweaks
+(above) are increasingly ignored by recent macOS in favour of profiles. Ask if
+you'd like a ready-made profile generated for this device.
+
 ## Notes / limitations
 
 - The engine stays a ClusterIP service (unauthenticated by design); only the UI

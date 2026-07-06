@@ -50,7 +50,7 @@ SCRIPTS := ./scripts
         deploy deploy-engine deploy-ui rollout \
         status urls logs-engine logs-ui restart-engine restart-ui \
         port-forward undeploy clean \
-        cluster-up kiosk-install kiosk-uninstall kiosk-doctor
+        cluster-up kiosk-install kiosk-uninstall kiosk-doctor kiosk-quiet
 
 # ----------------------------------------------------------------------------
 help: ## Show this help
@@ -184,6 +184,9 @@ kiosk-uninstall: ## Remove the kiosk LaunchAgents
 
 kiosk-doctor: ## Check the device is set up for kiosk mode (read-only diagnostics)
 	@$(SCRIPTS)/kiosk/doctor.sh
+
+kiosk-quiet: ## Silence macOS interruptions for kiosk use (update prompts, screen saver, sleep)
+	@$(SCRIPTS)/kiosk/quiet-macos.sh
 
 undeploy: ## Delete workloads + Secret (keeps the namespace)
 	@echo "==> Removing dashboard resources from '$(NAMESPACE)'"
