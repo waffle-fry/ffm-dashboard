@@ -97,6 +97,14 @@
         Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* Kiosk: hide the mouse cursor after a few seconds of inactivity. The idle
+ * timer (src/styles/cursor.ts, installIdleCursor) toggles this class on <body>;
+ * any pointer/keyboard activity removes it, so interaction still works. */
+body.cursor-hidden,
+body.cursor-hidden * {
+    cursor: none !important;
+}
+
 @layer base {
     html {
         background-color: var(--color-background);
